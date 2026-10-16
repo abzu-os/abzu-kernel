@@ -3,11 +3,11 @@ name: Build Abzu Kernel
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Allows you to manually trigger a build from the Web UI
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-14 # GitHub provides free Apple Silicon runners!
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@main
 
       - name: Build Kernel
-        run: nix build .#abzu-xnu-10.5.8
+        run: nix build .#abzu-xnu-10-5-8
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
