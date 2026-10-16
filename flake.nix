@@ -14,8 +14,9 @@
         inherit system crossSystem;
       };
       
-      # Updated to LLVM 18 (16 was removed from unstable)
-      llvm = pkgs.llvmPackages_18;
+      # CRITICAL FIX: Use buildPackages to get the HOST's LLVM (aarch64-darwin)
+      # This is the compiler that will run on the GitHub runner and output PPC code.
+      llvm = pkgs.buildPackages.llvmPackages_18;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -28,8 +29,9 @@
         version = "1228";
         src = xnu-src;
 
-        # Added gnumake explicitly for XNU's archaic build system
-        nativeBuildInputs = [ pkgs.gnumake llvm.clang llvm.lld ];
+        # nativeBuildInputs run on the build machine. 
+        # We explicitly pull gnumake from buildPackages as well.
+        nativeBuildInputs = [ pkgs.buildPackages.gnumake llvm.clang llvm.lld ];
 
         buildPhase = ''
           runHook preBuild
