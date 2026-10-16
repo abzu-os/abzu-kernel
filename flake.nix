@@ -7,18 +7,15 @@
 
   outputs = { self, nixpkgs }:
     let
-      # 1. Explicitly declare the host system (GitHub Actions macos-14 is aarch64-darwin)
       system = "aarch64-darwin";
-      
-      # 2. Explicitly declare the cross-compilation target
       crossSystem = { config = "powerpc-apple-darwin"; };
 
-      # 3. Import nixpkgs with BOTH systems explicitly defined
       pkgs = import nixpkgs {
         inherit system crossSystem;
       };
       
-      llvm = pkgs.llvmPackages_16;
+      # Updated to LLVM 18 (16 was removed from unstable)
+      llvm = pkgs.llvmPackages_18;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -26,13 +23,13 @@
       };
     in
     {
-      # 4. Use the explicit 'system' variable here too
       packages.${system}.abzu-xnu-10-5-8 = pkgs.stdenv.mkDerivation {
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
 
-        buildInputs = [ llvm.clang llvm.lld ];
+        # Added gnumake explicitly for XNU's archaic build system
+        nativeBuildInputs = [ pkgs.gnumake llvm.clang llvm.lld ];
 
         buildPhase = ''
           runHook preBuild
