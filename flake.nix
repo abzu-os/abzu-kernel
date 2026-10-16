@@ -7,22 +7,27 @@
 
   outputs = { self, nixpkgs }:
     let
-      pkgsCross = import nixpkgs {
-        crossSystem = {
-          config = "powerpc-apple-darwin";
-        };
+      # 1. Explicitly declare the host system (GitHub Actions macos-14 is aarch64-darwin)
+      system = "aarch64-darwin";
+      
+      # 2. Explicitly declare the cross-compilation target
+      crossSystem = { config = "powerpc-apple-darwin"; };
+
+      # 3. Import nixpkgs with BOTH systems explicitly defined
+      pkgs = import nixpkgs {
+        inherit system crossSystem;
       };
       
-      llvm = pkgsCross.llvmPackages_16;
+      llvm = pkgs.llvmPackages_16;
 
-      xnu-src = pkgsCross.fetchurl {
+      xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
         sha256 = "0000000000000000000000000000000000000000000000000000";
       };
     in
     {
-      # Changed from 'default' to 'abzu-xnu-10-5-8' to match our build command
-      packages.aarch64-darwin.abzu-xnu-10-5-8 = pkgsCross.stdenv.mkDerivation {
+      # 4. Use the explicit 'system' variable here too
+      packages.${system}.abzu-xnu-10-5-8 = pkgs.stdenv.mkDerivation {
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
