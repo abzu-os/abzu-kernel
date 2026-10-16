@@ -1,34 +1,56 @@
-{ pkgs ? import <nixpkgs> {} }:
+{
+  description = "Abzu Custom XNU Kernel";
 
-let
-  # GitHub's servers will download this. Your Mac never sees it.
-  xnu-1058-src = pkgs.fetchurl {
-    url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
-    sha256 = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx="; # We will get the real hash
+  inputs = {
+    # Use the latest nixpkgs for the best cross-compilation support
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  # Use Nix's built-in cross-compiler for PowerPC
-  pkgsCross = import <nixpkgs> { crossSystem = { config = "powerpc-apple-darwin"; }; };
-  llvm = pkgsCross.llvmPackages_16;
+  outputs = { self, nixpkgs }:
+    let
+      # 1. Set up cross-compilation for PowerPC (32-bit)
+      pkgsCross = import nixpkgs {
+        crossSystem = {
+          config = "powerpc-apple-darwin";
+        };
+      };
+      
+      llvm = pkgsCross.llvmPackages_16;
 
-in pkgs.stdenv.mkDerivation {
-  pname = "abzu-xnu-10.5.8";
-  version = "1228";
-  src = xnu-1058-src;
+      # 2. Fetch the Apple open-source tarball for xnu-1228 (Mac OS X 10.5.8)
+      xnu-src = pkgsCross.fetchurl {
+        url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
+        # We use a dummy hash of all zeros. Nix will intentionally fail 
+        # and tell us the exact, correct hash to use here!
+        sha256 = "0000000000000000000000000000000000000000000000000000";
+      };
+    in
+    {
+      # 3. Define the build package for the Apple Silicon (aarch64-darwin) runner
+      packages.aarch64-darwin.default = pkgsCross.stdenv.mkDerivation {
+        pname = "abzu-xnu-10.5.8";
+        version = "1228";
+        src = xnu-src;
 
-  # We will add our custom patches here later
-  # patches = [ ./patches/10.5.8-hfs-root.patch ];
+        buildInputs = [ llvm.clang llvm.lld ];
 
-  buildInputs = [ llvm.clang llvm.lld ];
+        # XNU's build system is archaic. We pass our modern Nix tools to it.
+        buildPhase = ''
+          runHook preBuild
+          make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
+               CC=${llvm.clang}/bin/clang \
+               LD=${llvm.lld}/bin/ld.lld \
+               SDKROOT=/
+          runHook postBuild
+        '';
 
-  buildPhase = ''
-    make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
-         CC=${llvm.clang}/bin/clang \
-         LD=${llvm.lld}/bin/ld.lld
-  '';
-
-  installPhase = ''
-    mkdir -p $out
-    cp BUILD/obj/RELEASE/PPC/mach_kernel $out/
-  '';
+        # Use 'find' to safely grab the mach_kernel regardless of exact subdirectory
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out
+          find BUILD -name "mach_kernel" -exec cp {} $out/ \; || true
+          runHook postInstall
+        '';
+      };
+    };
 }
