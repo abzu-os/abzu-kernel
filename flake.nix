@@ -44,6 +44,7 @@
             -e 's|/bin//pwd|pwd|g' \
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
+            -e 's|/bin/cp|cp|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
             {} +
@@ -53,6 +54,7 @@
           grep -rn "/usr/bin/config" . && echo "ERROR: config still hardcoded!" || echo "SUCCESS: config patched"
           grep -rn "/bin/pwd" . && echo "ERROR: pwd still hardcoded!" || echo "SUCCESS: pwd patched"
           grep -rn "/bin/mkdir" . && echo "ERROR: mkdir still hardcoded!" || echo "SUCCESS: mkdir patched"
+          grep -rn "/bin/cp" . && echo "ERROR: cp still hardcoded!" || echo "SUCCESS: cp patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
           
@@ -118,6 +120,7 @@ EOF
           command -v pwd || echo "WARNING: pwd not found in PATH!"
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
           command -v mkdir || echo "WARNING: mkdir not found in PATH!"
+          command -v cp || echo "WARNING: cp not found in PATH!"
           command -v tr || echo "WARNING: tr not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
