@@ -7,16 +7,19 @@
 
   outputs = { self, nixpkgs }:
     let
-      # We are building ON Linux (x86_64-linux), FOR PowerPC Darwin
+      # We are building ON Linux (x86_64-linux)
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
       
-      # Use the cross-compilation package set for PowerPC Darwin
-      pkgsCross = pkgs.pkgsCross.powerpc-darwin;
+      # Explicitly define the cross-compilation target
+      crossSystem = { config = "powerpc-darwin"; };
       
-      # Use the unwrapped clang from the cross-compiler set
-      clang = pkgsCross.llvmPackages.clang-unwrapped;
-      lld = pkgsCross.llvmPackages.lld;
+      # Import nixpkgs with both the host system and the cross target
+      pkgs = import nixpkgs { inherit system crossSystem; };
+      
+      # Use the LLVM tools from the cross-compiled package set
+      llvm = pkgs.llvmPackages_18;
+      clang = llvm.clang-unwrapped;
+      lld = llvm.lld;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -30,10 +33,7 @@
         src = xnu-src;
 
         # Native build inputs run on the Linux host
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils ];
-        
-        # We need the cross-compiler for the actual build
-        buildInputs = [ clang lld ];
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -57,8 +57,9 @@
           
           mkdir -p $TMPDIR/bin
           cat > $TMPDIR/bin/relpath << 'EOF'
-#!/usr/bin/env bash
-python3 -c "import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv)>2 else '.'))" "$1" "$2"
+#!/usr/bin/env python3
+import os, sys
+print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv)>2 else '.'))
 EOF
           chmod +x $TMPDIR/bin/relpath
           
