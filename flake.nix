@@ -34,17 +34,16 @@
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
-          # Use bash string interpolation for Nix store paths, and make replacements as robust as possible
+          # 1. Strip DOS line endings first to ensure all subsequent regex matches work
+          find . -type f -exec sed -i 's/\r//g' {} +
+          
+          # 2. Apply all our replacements
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
-            -e 's|/usr/sbin//sysctl|sysctl|g' \
             -e 's|/usr/bin/config|config|g' \
             -e 's|/usr/sbin/config|config|g' \
-            -e 's|/usr/sbin//config|config|g' \
             -e 's|/bin/pwd|pwd|g' \
-            -e 's|/bin//pwd|pwd|g' \
             -e 's|/bin/mkdir|mkdir|g' \
-            -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
             -e 's|#!/bin/csh|#!'"${pkgs.tcsh}"'/bin/tcsh|g' \
             -e 's|/bin/csh|tcsh|g' \
@@ -58,20 +57,12 @@
             -e 's|-mmultiple||g' \
             -e 's|-mno-multiple||g' \
             -e 's|-mmacosx-version-min=[^ ]*||g' \
+            -e 's|-isysroot [^ ]*||g' \
             {} +
           
           echo "=== DEBUG: Verifying patches ==="
-          grep -rn "/usr/sbin/sysctl" . && echo "ERROR: sysctl still hardcoded!" || echo "SUCCESS: sysctl patched"
-          grep -rn "/usr/bin/config" . && echo "ERROR: config still hardcoded!" || echo "SUCCESS: config patched"
-          grep -rn "/bin/pwd" . && echo "ERROR: pwd still hardcoded!" || echo "SUCCESS: pwd patched"
-          grep -rn "/bin/mkdir" . && echo "ERROR: mkdir still hardcoded!" || echo "SUCCESS: mkdir patched"
-          grep -rn "/bin/cp" . && echo "ERROR: cp still hardcoded!" || echo "SUCCESS: cp patched"
-          grep -rn "/bin/csh" . && echo "ERROR: csh still hardcoded!" || echo "SUCCESS: csh patched"
-          grep -rn "/usr/bin/perl" . && echo "ERROR: perl still hardcoded!" || echo "SUCCESS: perl patched"
-          grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
-          grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
-          grep -rn "/usr/bin/uname" . && echo "ERROR: uname still hardcoded!" || echo "SUCCESS: uname patched"
-          grep -rn "\-mmacosx-version-min=" . && echo "ERROR: macosx-version-min still present!" || echo "SUCCESS: macosx-version-min removed"
+          grep -rn "/usr/bin/config" . && echo "ERROR: /usr/bin/config still hardcoded!" || echo "SUCCESS: /usr/bin/config patched"
+          grep -rn "/usr/sbin/config" . && echo "ERROR: /usr/sbin/config still hardcoded!" || echo "SUCCESS: /usr/sbin/config patched"
           
           runHook postPatch
         '';
@@ -85,7 +76,6 @@
           cat > "$TMPDIR/bin/config" << 'EOF'
 #!/bin/sh
 echo "Dummy config: skipping kernel configuration generation"
-# Create dummy files if the Makefile expects them
 touch ioconf.c ioconf.h
 EOF
           chmod +x "$TMPDIR/bin/config"
@@ -139,6 +129,9 @@ fi
 EOF
           chmod +x "$TMPDIR/bin/sysctl"
 
+          # CRITICAL: Force the Makefile to use our mocked tools via environment variables
+          export CONFIG=config
+          export UNAME=uname
           export PATH="$TMPDIR/bin:$PATH"
 
           echo "=== DEBUG: Checking PATH and tools ==="
