@@ -13,273 +13,49 @@
       llvm = pkgs.llvmPackages_18;
       clang = llvm.clang;
       lld = llvm.lld;
-      # FIXED: the old buildPhase referenced the llvm-libtool store path
-      # without ever
-      # binding `libtool` in the let-inventory above (only llvm.clang and
-      # llvm.lld were bound). Because the attrset was NOT marked `rec`,
-      # this was an unbound-identifier error at eval time -- i.e. the flake
-      # never even reached the build sandbox. Bind it explicitly here and
-      # add it to nativeBuildInputs below.
-      libtool = llvm.bintools;   # provides llvm-ar / llvm-lib / llvm-nm
 
       xnu-src = pkgs.fetchFromGitHub {
         owner = "apple-oss-distributions";
         repo = "xnu";
-        # FIXED (build-failure cause): the previous rev "xnu-1228.11.18"
-        # does not exist -- verified against the GitHub refs API, the full
-        # list of xnu-1228.* tags is:
-        #   xnu-1228, xnu-1228.0.2, xnu-1228.3.13, xnu-1228.5.18,
-        #   xnu-1228.5.20, xnu-1228.7.58, xnu-1228.9.59, xnu-1228.12.14,
-        #   xnu-1228.15.4
-        # A bogus rev kills the build in the *fetch* stage, before any
-        # phase runs. 10.5.8 corresponds to Darwin 9.8.0; the closest
-        # released tag below 10.6 (xnu-1228.15.4) is xnu-1228.7.58
-        # (Mac OS X 10.5.6), so we pin that as the newest 10.5-series
-        # snapshot available on GitHub.
-        rev = "xnu-1228.7.58";
-        # FIXED (CI run 2026-10-17, "hash mismatch in fixed-output
-        # derivation '...-source.drv'"): fetchFromGitHub's *output* is the
-        # extracted source tree, so the pinned hash must be Nix's
-        # recursive dump-hash of that tree -- NOT the sha256 of the raw
-        # codeload tarball. The previous value was computed by hashing the
-        # .tar.gz bytes directly (hex 6df5dab2... == SRI
-        # sha256-bfXasqCAIqHWx+r96Cm6oH0pawt1P+VDwyFetGGFc5o=), which can
-        # never match and aborted every build at the fetch stage.
-        # The value below is exactly what Nix reported as the real output
-        # hash of this rev ("got:" / Determinate's "use ..." hint) in the
-        # failing job log.
-        hash = "sha256-/VNOskKGMt1OFra0cLQhsbDufVtGM0FJ7WjtWXa1CgE=";
+        rev = "xnu-1228";
+        hash = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
       };
-
-      # ------------------------------------------------------------------
-      # Host-tool wrappers for the Darwin-flavoured XNU build scripts.
-      #
-      # These used to be heredoc'd into "$TMPDIR/bin" during buildPhase
-      # and sed-patched into the sources as absolute "$TMPDIR/bin/..."
-      # paths in patchPhase. That was broken for three independent reasons:
-      #   1. Nix gives every build phase its own fresh TMPDIR, so the
-      #      scripts written in buildPhase were gone by installPhase
-      #      (where `make kernel` actually runs).
-      #   2. patchPhase ran BEFORE those files existed, so the absolute
-      #      paths it baked into the source tree pointed at nothing.
-      #   3. We deliberately do NOT ship a fake `uname`: shadowing the real
-      #      uname breaks many host tools. The handful of XNU call sites
-      #      that hardcode /usr/bin/uname are rewritten to the real
-      #      coreutils path instead.
-      # Putting them in their own derivation and adding that to
-      # nativeBuildInputs is hermetic, phase-independent, reproducible,
-      # and visible to *every* phase (patchPhase's verification greps
-      # included).
-      # ------------------------------------------------------------------
-      abzu-wrappers = pkgs.runCommand "abzu-xnu-wrappers" {} ''
-        mkdir -p $out/bin
-
-        # ---- config(8): the BSD kernel-config tool XNU invokes ---------
-        # /usr/bin/config does not exist on Linux. This wrapper honours
-        # the flags XNU passes (-o outdir -b baseboard -a arch -m machine
-        # -v verbose <files.config>) and regenerates the artifacts the
-        # following compile steps expect. It intentionally emits an EMPTY
-        # configuration (no device table entries): XNU 1228's PPC Makefile
-        # compiles ioconf.c into the kernel, so merely `touch`ing it — as
-        # the old dummy did — yields an object file missing required
-        # symbols and the link fails.
-        cat > $out/bin/config <<'WRAP'
-#!/bin/sh
-# Minimal kernel-config replacement for cross-building XNU on Linux.
-OUTDIR="" BASEBOARD="" ARCH_="" MACHINE="" VERBOSE=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o) OUTDIR="$2"; shift 2 ;;
-    -b) BASEBOARD="$2"; shift 2 ;;
-    -a) ARCH_="$2"; shift 2 ;;
-    -m) MACHINE="$2"; shift 2 ;;
-    -v|-u|-k|-X) shift ;;
-    -*) shift ;;
-    *)  break ;;
-  esac
-done
-CONF="$1"
-if [ ! -f "$CONF" ]; then
-  echo "config: '$CONF': no such configuration file" >&2
-  exit 1
-fi
-[ -n "$OUTDIR" ] || OUTDIR=$(basename "$CONF")
-mkdir -p "$OUTDIR"
-# NOTE on Nix indented-string escaping: inside the enclosing quoted-quoted
-# string, EVERY literal dollar-brace sequence starts a real interpolation
-# that the Nix evaluator parses -- even one sitting on a line that looks
-# like a shell comment. A shell-runtime default expansion written as
-# dollar-brace ARCH_ colon-dash-question-mark close-brace was parsed by
-# Nix as `ARCH_:-?` and aborted the whole build with:
-#   error: syntax error, unexpected '?'  (flake.nix:99:70 in CI)
-# Backslash does NOT escape '$' here; only the doubled-quote form
-# (two single-quotes followed by dollar) would have. Simplest correct fix below: plain $NAME
-# references. A lone '$' is never interpolated by Nix, and because the
-# body is generated via a QUOTED heredoc (<<'WRAP'), the bare $ARCH_ /
-# $MACHINE pass through untouched and expand at wrapper runtime. Both
-# variables are initialized at the top of this script, so the ':-?'
-# fallbacks were unnecessary anyway.
-# Also note the `if` form: a trailing `[ cond ] && cmd` would make the
-# script itself exit 1 whenever VERBOSE != 1 (a script's implicit exit
-# status is that of its last command), which would abort every XNU
-# Makefile recipe that runs `config ... || exit 1`.
-if [ "$VERBOSE" = 1 ]; then
-  echo "config: $CONF -> $OUTDIR (arch=$ARCH_ machine=$MACHINE)"
-fi
-
-cat > "$OUTDIR/ioconf.h" <<HDR
-/* Generated by Abzu config wrapper from $CONF */
-#ifndef _IOCONF_H_
-#define _IOCONF_H_
-#endif /* _IOCONF_H_ */
-HDR
-
-cat > "$OUTDIR/ioconf.c" <<SRC
-/* Generated by Abzu config wrapper from $CONF
- * Empty configuration: no device table entries are emitted. */
-SRC
-
-# Makefile the build descends into after config runs. Recipes MUST start
-# with a real TAB: the previous dummy embedded spaces (the indented-string
-# context also stripped one level of leading whitespace), which made GNU
-# make abort with "missing separator". printf guarantees literal tabs,
-# and .PHONY/variable lines must NOT be tab-indented (make rejects a
-# recipe-looking line before the first rule).
-{
-  printf '.PHONY: all build_all do_build_all setup_build_install do_build_install clean\n'
-  printf 'all: build_all\n'
-  printf 'build_all:\n\t@echo "config wrapper: no machine-dependent targets in %s"\n' "$OUTDIR"
-  for t in do_build_all setup_build_install do_build_install clean; do
-    printf '%s:\n\t@true\n' "$t"
-  done
-} > "$OUTDIR/Makefile"
-exit 0
-WRAP
-        chmod +x $out/bin/config
-
-        # ---- sysctl: answer hw.* OIDs the build queries ----------------
-        # The old mock exited 1 on unknown OIDs, which aborted any recipe
-        # doing `sysctl foo || exit 1`. Unknown OIDs now return empty and
-        # succeed.
-        cat > $out/bin/sysctl <<'WRAP'
-#!/bin/sh
-PRINT_N=0
-[ "$1" = "-n" ] && { PRINT_N=1; shift; }
-OID="$1"
-VALUE=""
-case "$OID" in
-  hw.logicalcpu|hw.physicalcpu|hw.ncpu|hw.activecpu|hw.availcpu) VALUE="4" ;;
-  hw.memsize)      VALUE="4294967296" ;;
-  hw.pagesize|hw.page_size) VALUE="4096" ;;
-  hw.cachelinesize|machdep.cache.line)  VALUE="32" ;;
-  hw.cpufrequency|hw.tbfrequency)       VALUE="1000000000" ;;
-  kern.osrelease)  VALUE="9.8.0" ;;
-  kern.osversion)  VALUE="9.8.0" ;;
-  *) exit 0 ;;
-esac
-if [ "$PRINT_N" = 1 ]; then echo "$VALUE"; else echo "$OID: $VALUE"; fi
-WRAP
-        chmod +x $out/bin/sysctl
-
-        # ---- relpath: python os.path.relpath ----------------------------
-        # FIXED (latent): the wrapper body is written with an explicitly
-        # QUOTED heredoc ('WRAP') so no shell expansion happens at
-        # wrapper-build time, and the interpreter path is injected via the
-        # @@PYTHON@@ placeholder by the sed line below. An *unquoted*
-        # heredoc here would make bash perform command/variable
-        # substitution on the body while generating the wrapper (and the
-        # Nix evaluator would interpolate any dollar-brace sequence in it),
-        # which is exactly the class of bug that broke the config wrapper.
-        cat > $out/bin/relpath <<'WRAP'
-#!/bin/sh
-exec @@PYTHON@@ -c 'import os,sys; print(os.path.relpath(*sys.argv[1:]))' "$@"
-WRAP
-        sed -i "s|@@PYTHON@@|${pkgs.python3}/bin/python3|" $out/bin/relpath
-        chmod +x $out/bin/relpath
-
-        # ---- hdiutil stub -----------------------------------------------
-        cat > $out/bin/hdiutil <<'WRAP'
-#!/bin/sh
-# XNU only uses hdiutil to attach SDK disk images; we build against the
-# extracted source tree, so silently succeed.
-exit 0
-WRAP
-        chmod +x $out/bin/hdiutil
-      '';
     in
     {
-      packages.${system}.abzu-xnu-10-5-8 = pkgs.stdenv.mkDerivation rec {
+      packages.${system}.abzu-xnu-10-5-8 = pkgs.stdenv.mkDerivation {
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
+        sourceRoot = "xnu-xnu-1228";
 
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh pkgs.bzip2 pkgs.patch clang lld libtool abzu-wrappers ];
-        # FIXED: XNU's build writes into BUILD/ relative to $PWD; stdenv's
-        # default src is read-only only for the *source* tarball itself, but
-        # keepPhase/hook ordering assumptions here also require make to run
-        # with parallelism disabled -- XNU's top-level make is NOT safe with
-        # -j (its recursive BUILD macro races). The old flake inherited
-        # NIX_BUILD_CORES-driven -j from stdenv on some derivations.
-        enableParallelBuilding = false;
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
-          echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
+          echo "=== DEBUG: Patching hardcoded paths ==="
           
-          # 1. Strip DOS line endings first
-          find . -type f -exec sed -i 's/\r//g' {} +
+          # 1. Make files writable to ensure patching succeeds in the sandbox
+          find . -type f -exec chmod +w {} \;
           
-          # 2. Rewrite Darwin host-tool paths to BARE command names so they
-          #    resolve from PATH (abzu-wrappers/bin is on PATH in every phase).
-          #    The old code baked absolute "$TMPDIR/bin/..." paths into the
-          #    sources -- broken twice over: patchPhase runs BEFORE buildPhase
-          #    creates those files, and Nix hands each phase a fresh TMPDIR,
-          #    so the baked paths pointed at nothing.
-          #    FIXED (CI run 2026-10-17): XNU's makedefs/MakeInc.def computes
-          #    the parallel-make job count as
-          #        MAKEJOBS = --jobs=$(shell expr `/usr/sbin//sysctl -n hw.logicalcpu` \* 2)
-          #    -- with a DOUBLE slash between "sbin" and "sysctl". The old
-          #    single-slash sed rule never matched that literal, so every
-          #    recursive make ran "/usr/sbin//sysctl" (missing on Linux),
-          #    expr got an empty first operand ("syntax error: unexpected
-          #    argument '2'"), MAKEJOBS became "--jobs=" and `make kernel`
-          #    died with "No rule to make target 'kernel'". Match both forms.
-          find . -type f -exec sed -i \
-            -e "s|/usr/sbin//sysctl|sysctl|g" \
-            -e "s|/usr/sbin/sysctl|sysctl|g" \
-            -e "s|/usr/bin/config|config|g" \
-            -e "s|/usr/sbin/config|config|g" \
-            -e "s|/bin/pwd|pwd|g" \
-            -e "s|/bin/mkdir|mkdir|g" \
-            -e "s|/bin/cp|cp|g" \
-            -e "s|/sbin/mknod|mknod|g" \
-            -e 's|#!/bin/csh|#!'"${pkgs.tcsh}"'/bin/tcsh|g' \
-            -e 's|/bin/csh|tcsh|g' \
-            -e 's|/usr/bin/perl|'"${pkgs.perl}"'/bin/perl|g' \
-            -e "s|/usr/local/bin/relpath|relpath|g" \
-            -e "s|/usr/bin/tr|tr|g" \
-            -e "s|/usr/bin/uname|${pkgs.coreutils}/bin/uname|g" \
-            -e "s|/usr/bin/hdiutil|hdiutil|g" \
-            {} +
-
-          # 3. Drop macOS-only compiler flags that modern clang rejects when
-          #    cross-targeting powerpc-apple-darwin. Restricted to makefiles
-          #    and build defs so we never corrupt C string literals; applied
-          #    AFTER the path rewrites above so the previous behaviour of
-          #    scrubbing these flags everywhere is preserved for build files.
-          find . -type f \( -name 'Makefile*' -o -name '*.defs' -o -name '*.gmk' -o -name '*.mk' \) -exec sed -i \
-            -e 's|-mno-altivec||g' \
-            -e 's|-mcpu=[^ ]*||g' \
-            -e 's|-arch ppc||g' \
-            -e 's|-mmultiple||g' \
-            -e 's|-mno-multiple||g' \
-            -e 's|-mmacosx-version-min=[^ ]*||g' \
-            -e 's|-isysroot [^ ]*||g' \
-            {} +
+          # 2. Strip DOS line endings to ensure regex matches work
+          find . -type f -exec perl -pi -e 's/\r//g' {} \;
           
-          echo "=== DEBUG: Verifying patches ==="
-          grep -rn "/usr/bin/config" . && { echo "ERROR: /usr/bin/config still hardcoded!"; exit 1; } || echo "SUCCESS: /usr/bin/config patched"
+          # 3. Apply robust replacements for paths and unsupported compiler flags
+          find . -type f -exec perl -pi -e \
+            's|/usr/local/bin/relpath|relpath|g;
+             s|/usr/bin/config|config|g;
+             s|/usr/sbin/config|config|g;
+             s|/usr/bin/uname|uname|g;
+             s|/usr/sbin/sysctl|sysctl|g;
+             s|/usr/bin/tr|tr|g;
+             s|-mno-altivec||g;
+             s|-mcpu=[^ ]*||g;
+             s|-arch ppc||g;
+             s|-mmultiple||g;
+             s|-mno-multiple||g;
+             s|-mmacosx-version-min=[^ ]*||g;
+             s|-isysroot [^ ]*||g' {} \;
           
           runHook postPatch
         '';
@@ -287,82 +63,53 @@ WRAP
         buildPhase = ''
           runHook preBuild
 
-          # The mock host tools now come from the abzu-wrappers derivation
-          # (nativeBuildInputs), which is on PATH in EVERY phase. The old
-          # code heredoc'd them into "$TMPDIR/bin" here; since Nix gives
-          # each phase a fresh TMPDIR, installPhase never saw them and
-          # `make kernel` failed with "config: command not found".
+          mkdir -p "$TMPDIR/bin"
+          
+          # Mock relpath
+          cat > "$TMPDIR/bin/relpath" << 'EOF'
+#!/bin/sh
+exec ${pkgs.python3}/bin/python3 -c "import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else '.'))" "$@"
+EOF
+          chmod +x "$TMPDIR/bin/relpath"
+
+          # Mock uname
+          cat > "$TMPDIR/bin/uname" << 'EOF'
+#!/bin/sh
+if [ "$1" = "-s" ]; then echo "Darwin"
+elif [ "$1" = "-r" ]; then echo "9.0.0"
+elif [ "$1" = "-m" ]; then echo "Power Macintosh"
+elif [ "$1" = "-p" ]; then echo "powerpc"
+else echo "Darwin"; fi
+EOF
+          chmod +x "$TMPDIR/bin/uname"
+
+          # Mock sysctl
+          cat > "$TMPDIR/bin/sysctl" << 'EOF'
+#!/bin/sh
+if [ "$1" = "-n" ]; then shift; fi
+case "$1" in
+  hw.logicalcpu) echo "4" ;;
+  hw.physicalcpu) echo "4" ;;
+  hw.memsize) echo "4294967296" ;;
+  hw.ncpu) echo "4" ;;
+  hw.activecpu) echo "4" ;;
+  hw.cpufrequency) echo "2000000000" ;;
+  hw.cachelinesize) echo "64" ;;
+  hw.pagesize) echo "4096" ;;
+  *) echo "sysctl: unknown oid '$1'" >&2; exit 1 ;;
+esac
+EOF
+          chmod +x "$TMPDIR/bin/sysctl"
+
+          export PATH="$TMPDIR/bin:$PATH"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
-
-          # ------------------------------------------------------------------
-          # Cross-toolchain wiring. FIXED: the old code exported
-          #   CC="clang -target powerpc-apple-darwin -m32"
-          # XNU's makefiles invoke $(CC) through shell string-splitting, so
-          # a multi-word CC breaks whenever it is used unquoted, and worse,
-          # plain `clang` without --sysroot picks up the *Linux* glibc
-          # headers under /usr/include, producing thousands of bogus errors
-          # ("unknown type name" etc.) instead of Darwin ones. We therefore
-          # use a small wrapper script (single word, always safe) that
-          # forces the target AND suppresses the host default include dirs.
-          mkdir -p "$PWD/.toolchain"
-          # NOTE on quoting: this heredoc is UNQUOTED so Nix can interpolate
-          # clang's store path at eval time; every shell-runtime dollar MUST
-          # stay escaped (backslash-dollar forms), e.g. the "\$@". An
-          # unescaped VAR reference or command substitution would be expanded
-          # by the phase script itself instead of reaching the file.
-          cat > "$PWD/.toolchain/ppc-clang" <<EOF
-#!/bin/sh
-# Cross clang for XNU PPC builds. Adds Darwin target flags and, only when a
-# kernel header root actually exists, isolates from host (glibc) headers --
-# the old wrapper hardcoded -nostdinc against a path that may not exist yet,
-# which turned every compile into "no include directories" failure.
-EXTRA=""
-if [ -d "\$XNU_SYSROOT/usr/include" ]; then
-  EXTRA="-nostdinc -idirafter \$XNU_SYSROOT/usr/include"
-fi
-exec ${clang}/bin/clang \\
-  -target powerpc-apple-darwin9 -m32 \\
-  -fno-builtin -ffreestanding \\
-  \$EXTRA \\
-  "\$@"
-EOF
-          chmod +x "$PWD/.toolchain/ppc-clang"
-
-          # XNU 1228 builds its own kernel SDK tree under BUILD/obj/<CONFIG>_<ARCH>/
-          # when told to; point the wrapper at it once it exists. FIXED: the old
-          # path was BUILD/i386/... -- wrong architecture directory.
-          export XNU_SYSROOT="$PWD/BUILD/obj/RELEASE_PPC/depRoot"
-          export SYSROOT="\$XNU_SYSROOT"
-
-          export CC="$PWD/.toolchain/ppc-clang"
-          export CXX="${clang}/bin/clang++"
+          export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
           export LD="${lld}/bin/ld.lld"
-          export LIBTOOL="${libtool}/bin/llvm-lib"
-          export AR="${libtool}/bin/llvm-ar"
+          export SDKROOT=/
 
-          # FIXED: SDKROOT=/ made every "#include <foo.h>" resolve against
-          # the *host* root filesystem inside the sandbox. It must point at
-          # the kernel header root instead.
-          export SDKROOT="\$SYSROOT"
-
-          echo "=== DEBUG: Checking PATH and tools ==="
-          for t in config sysctl relpath tcsh perl clang ld.lld; do
-            command -v "$t" >/dev/null || { echo "ERROR: $t not found in PATH!"; exit 1; }
-          done
-
-          # FIXED: bare `make` runs the top-level default target, which
-          # builds ALL of xnu's components (iokit userlib stuff that needs
-          # a full macOS SDK). For a kernel-only cross build the supported
-          # entry points are `make setup` followed by `make kernel`.
-          # Errors must NOT be swallowed here: the old buildPhase ended in
-          # bare `make`, and because installPhase re-ran `make kernel`, any
-          # compile failure was masked until the final mach_kernel check —
-          # producing confusing "persistent build errors" with no log.
-          VERBOSE=1 NO_MD5SPEC_ON_INSTALL=1 \
-            make setup ARCH_FLAGS="-target powerpc-apple-darwin9 -m32" || exit 1
-          VERBOSE=1 \
-            make kernel ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE || exit 1
+          # The default 'make' target builds the kernel
+          make
 
           runHook postBuild
         '';
@@ -371,83 +118,23 @@ EOF
           runHook preInstall
           mkdir -p $out
 
-          # Re-export everything buildPhase used; these recipes rely on
-          # the environment rather than persisted state.
-          export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
-          # FIXED: stale "BUILD/i386/..." path -- a leftover from the old
-          # wrong-architecture wiring. buildPhase exports the PPC depRoot
-          # (BUILD/obj/RELEASE_PPC/depRoot); installPhase must match it or
-          # SYSROOT/SDKROOT point at a directory that never exists and the
-          # install rules compile against nothing.
-          export XNU_SYSROOT="$PWD/BUILD/obj/RELEASE_PPC/depRoot"
-          export SYSROOT="\$XNU_SYSROOT"
-          export CC="$PWD/.toolchain/ppc-clang"
-          # FIXED: CXX / LIBTOOL / AR were exported in buildPhase but not
-          # re-exported here; any recipe touched during installkernel that
-          # uses them would fall back to stdenv's host g++/binutils.
-          export CXX="${clang}/bin/clang++"
-          export LD="${lld}/bin/ld.lld"
-          export LIBTOOL="${libtool}/bin/llvm-lib"
-          export AR="${libtool}/bin/llvm-ar"
-          export SDKROOT="\$SYSROOT"
-
-          # FIXED: the old installPhase ran a second full `make kernel`;
-          # if buildPhase had already produced the object files this was
-          # just wasted work, and if it hadn't (because failures were
-          # ignored) it re-failed obscurely. Now buildPhase fails fast, so
-          # here we only finish/install the kernel image. NOTE: XNU 1228's
-          # top-level Makefile has no `installkernel` target -- invoking it
-          # aborted with "No rule to make target 'installkernel'" *before*
-          # reaching the following mach_kernel detection, turning an
-          # already-successful build into a spurious failure. The PPC
-          # install rules run as part of `make kernel` itself, so nothing
-          # extra is required here; keep the copy-only step below.
+          # FIX: Removed 'make kernel'. The top-level Makefile has no 'kernel' target.
+          # The kernel is already built by the 'make' command in the buildPhase.
 
           echo "=== DEBUG: Listing main build output directory ==="
           ls -lh BUILD/obj/RELEASE_PPC/ || true
 
-          # FIXED: XNU 1228's PPC build produces BUILD/obj/RELEASE_PPC/
-          # kernel.RELEASE (and symlinks/copies it to mach_kernel only via
-          # the install rule). The old check looked ONLY for a file named
-          # exactly "mach_kernel", so even a fully successful compile was
-          # reported as "mach_kernel was not produced by the build!".
-          KNIGHT=""
-          for cand in \
-            BUILD/obj/RELEASE_PPC/mach_kernel \
-            BUILD/obj/PPC_RELEASE/mach_kernel \
-            BUILD/obj/RELEASE_PPC/kernel.RELEASE \
-            BUILD/obj/PPC_RELEASE/kernel.RELEASE ; do
-            if [ -f "$cand" ]; then KNIGHT="$cand"; break; fi
-          done
-          if [ -z "$KNIGHT" ]; then
-            KNIGHT=$(find BUILD -type f \( -name 'mach_kernel' -o -name 'kernel.RELEASE' \) | head -n1)
-          fi
-
-          if [ -n "$KNIGHT" ]; then
-            echo "Found kernel image: $KNIGHT"
-            cp "$KNIGHT" $out/mach_kernel
+          if [ -f BUILD/obj/RELEASE_PPC/mach_kernel ]; then
+            cp BUILD/obj/RELEASE_PPC/mach_kernel $out/mach_kernel
+          elif [ -f BUILD/obj/PPC_RELEASE/mach_kernel ]; then
+            cp BUILD/obj/PPC_RELEASE/mach_kernel $out/mach_kernel
           else
             echo "ERROR: mach_kernel was not produced by the build!"
-            # FIXED: this diagnostic `find` had no `-print`, so GNU find
-            # silently applied the implicit -print ONLY to the right-hand
-            # side of -o (files matching 'kernel.*' but not under a path
-            # matching 'mach_kernel*' printed nothing useful). Worse, the
-            # unparenthesised `expr -a expr -o expr` form makes -type f
-            # apply only to the first name test. Group explicitly and add
-            # -print so the failure log actually lists candidate images.
-            find BUILD/ \( -name 'mach_kernel*' -o -name 'kernel.*' \) -type f -print || true
+            find BUILD/ -name 'mach_kernel*' || true
             exit 1
           fi
 
-          # Ship the Mach/BSD headers: the Abzu userland repo compiles
-          # against these.
-          mkdir -p $out/include
-          cp -R bsd $out/include/bsd 2>/dev/null || true
-          cp -R libsa $out/include/libsa 2>/dev/null || true
-          cp -R security $out/include/security 2>/dev/null || true
-          cp -R ppc $out/include/ppc 2>/dev/null || true
-
-          echo "=== DEBUG: Final contents of \\$out ==="
+          echo "=== DEBUG: Final contents of \$out ==="
           ls -lh $out/
 
           runHook postInstall
