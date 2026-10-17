@@ -18,7 +18,8 @@
         owner = "apple-oss-distributions";
         repo = "xnu";
         rev = "xnu-1228";
-        hash = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
+        # THIS IS THE CORRECT HASH PROVIDED BY NIX
+        hash = "sha256-77fddC7Udhh4uuqCJuoyeAuRCNJiNBpZZgivOM8p1gU=";
       };
     in
     {
@@ -118,7 +119,7 @@ EOF
           runHook preInstall
           mkdir -p $out
 
-          # FIX: Removed 'make kernel'. The top-level Makefile has no 'kernel' target.
+          # NOTE: Removed 'make kernel'. The top-level Makefile has no 'kernel' target.
           # The kernel is already built by the 'make' command in the buildPhase.
 
           echo "=== DEBUG: Listing main build output directory ==="
