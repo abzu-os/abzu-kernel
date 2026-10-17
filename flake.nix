@@ -27,7 +27,7 @@
         version = "1228";
         src = xnu-src;
 
-        # Added perl and tcsh (provides csh) to nativeBuildInputs
+        # Added perl and tcsh (which provides csh) to nativeBuildInputs
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
 
@@ -35,6 +35,8 @@
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
+          # Note: We use Nix string interpolation ${pkgs.tcsh} to inject the absolute store path,
+          # ensuring shebangs like #!/bin/csh become valid absolute paths like #!/nix/store/.../bin/csh
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
             -e 's|/usr/sbin//sysctl|sysctl|g' \
@@ -46,8 +48,8 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
-            -e 's|/bin/csh|csh|g' \
-            -e 's|/usr/bin/perl|perl|g' \
+            -e 's|/bin/csh|${pkgs.tcsh}/bin/csh|g' \
+            -e 's|/usr/bin/perl|${pkgs.perl}/bin/perl|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
             {} +
