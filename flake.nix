@@ -33,20 +33,17 @@
 
         patchPhase = ''
           runHook prePatch
-          echo "=== DEBUG: Patching hardcoded paths using GNU sed ==="
+          echo "=== DEBUG: Aggressively patching hardcoded paths using GNU sed ==="
           
-          find . -type f -exec sed -i 's|/usr/local/bin/relpath|relpath|g' {} +
-          find . -type f -exec sed -i 's|/usr/bin/config|config|g' {} +
-          find . -type f -exec sed -i 's|/usr/sbin/config|config|g' {} +
+          # Strip /usr/sbin/ and /usr/bin/ prefixes entirely, then clean up any resulting double slashes
+          find . -type f -exec sed -i -e 's|/usr/sbin/||g' -e 's|/usr/bin/||g' -e 's|//|/|g' {} +
           find . -type f -exec sed -i 's|/bin/pwd|pwd|g' {} +
-          find . -type f -exec sed -i 's|/usr/sbin/sysctl|sysctl|g' {} +
+          find . -type f -exec sed -i 's|/usr/local/bin/relpath|relpath|g' {} +
           
           echo "=== DEBUG: Verifying patches ==="
-          grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
-          grep -rn "/usr/bin/config" . && echo "ERROR: /usr/bin/config still hardcoded!" || echo "SUCCESS: /usr/bin/config patched"
-          grep -rn "/usr/sbin/config" . && echo "ERROR: /usr/sbin/config still hardcoded!" || echo "SUCCESS: /usr/sbin/config patched"
+          grep -rn "/usr/sbin/" . && echo "WARNING: Some /usr/sbin/ paths might remain!" || echo "SUCCESS: /usr/sbin/ paths cleared"
           grep -rn "/bin/pwd" . && echo "ERROR: /bin/pwd still hardcoded!" || echo "SUCCESS: /bin/pwd patched"
-          grep -rn "/usr/sbin/sysctl" . && echo "ERROR: /usr/sbin/sysctl still hardcoded!" || echo "SUCCESS: /usr/sbin/sysctl patched"
+          grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           
           runHook postPatch
         '';
