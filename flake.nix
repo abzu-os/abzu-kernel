@@ -7,18 +7,11 @@
 
   outputs = { self, nixpkgs }:
     let
+      # We use the native host system, avoiding crossSystem entirely
       system = "aarch64-darwin";
+      pkgs = import nixpkgs { inherit system; };
       
-      # CRITICAL FIX: Use the exact Nixpkgs system string for 32-bit PowerPC macOS
-      crossSystem = { config = "powerpc-darwin"; };
-
-      pkgs = import nixpkgs {
-        inherit system crossSystem;
-        config.allowUnsupportedSystem = true;
-      };
-      
-      clang = pkgs.clang;
-      lld = pkgs.lld;
+      llvm = pkgs.llvmPackages_18;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -31,14 +24,21 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.buildPackages.gnumake clang lld ];
+        nativeBuildInputs = [ pkgs.gnumake llvm.clang llvm.lld ];
+
+        # Disable Nixpkgs default hardening, which can interfere with manual cross-compilation
+        hardeningDisable = [ "all" ];
 
         buildPhase = ''
           runHook preBuild
+          
+          # Manually force Clang to target 32-bit PowerPC macOS
+          # -m32 ensures it generates 32-bit code, -target sets the OS/Arch
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
-               CC=${clang}/bin/clang \
-               LD=${lld}/bin/ld.lld \
+               CC="${llvm.clang}/bin/clang -target powerpc-apple-darwin -m32" \
+               LD="${llvm.lld}/bin/ld.lld" \
                SDKROOT=/
+          
           runHook postBuild
         '';
 
