@@ -34,6 +34,7 @@
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
+          # Use bash string interpolation for Nix store paths, and make replacements as robust as possible
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
             -e 's|/usr/sbin//sysctl|sysctl|g' \
@@ -45,16 +46,18 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
-            -e 's|#!/bin/csh|#!${pkgs.tcsh}/bin/tcsh|g' \
+            -e 's|#!/bin/csh|#!'"${pkgs.tcsh}"'/bin/tcsh|g' \
             -e 's|/bin/csh|tcsh|g' \
-            -e 's|/usr/bin/perl|${pkgs.perl}/bin/perl|g' \
+            -e 's|/usr/bin/perl|'"${pkgs.perl}"'/bin/perl|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
+            -e 's|/usr/bin/uname|uname|g' \
             -e 's|-mno-altivec||g' \
             -e 's|-mcpu=[^ ]*||g' \
             -e 's|-arch ppc||g' \
             -e 's|-mmultiple||g' \
             -e 's|-mno-multiple||g' \
+            -e 's|-mmacosx-version-min=[^ ]*||g' \
             {} +
           
           echo "=== DEBUG: Verifying patches ==="
@@ -67,8 +70,8 @@
           grep -rn "/usr/bin/perl" . && echo "ERROR: perl still hardcoded!" || echo "SUCCESS: perl patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
-          grep -rn "\-mno-altivec" . && echo "ERROR: -mno-altivec still present!" || echo "SUCCESS: -mno-altivec removed"
-          grep -rn "\-mcpu=" . && echo "ERROR: -mcpu= still present!" || echo "SUCCESS: -mcpu= removed"
+          grep -rn "/usr/bin/uname" . && echo "ERROR: uname still hardcoded!" || echo "SUCCESS: uname patched"
+          grep -rn "\-mmacosx-version-min=" . && echo "ERROR: macosx-version-min still present!" || echo "SUCCESS: macosx-version-min removed"
           
           runHook postPatch
         '';
@@ -86,6 +89,19 @@ echo "Dummy config: skipping kernel configuration generation"
 touch ioconf.c ioconf.h
 EOF
           chmod +x "$TMPDIR/bin/config"
+
+          # Dummy uname script to satisfy the XNU Makefile
+          cat > "$TMPDIR/bin/uname" << 'EOF'
+#!/bin/sh
+if [ "$1" = "-s" ]; then
+  echo "Darwin"
+elif [ "$1" = "-r" ]; then
+  echo "9.0.0"
+else
+  echo "Darwin"
+fi
+EOF
+          chmod +x "$TMPDIR/bin/uname"
 
           # Mock relpath
           cat > "$TMPDIR/bin/relpath" << 'EOF'
@@ -128,8 +144,8 @@ EOF
           echo "=== DEBUG: Checking PATH and tools ==="
           echo "PATH is: $PATH"
           command -v config || echo "WARNING: config not found in PATH!"
+          command -v uname || echo "WARNING: uname not found in PATH!"
           command -v relpath || echo "WARNING: relpath not found in PATH!"
-          command -v pwd || echo "WARNING: pwd not found in PATH!"
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
           command -v mkdir || echo "WARNING: mkdir not found in PATH!"
           command -v cp || echo "WARNING: cp not found in PATH!"
