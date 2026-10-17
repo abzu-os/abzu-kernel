@@ -39,7 +39,7 @@
         owner = "apple-oss-distributions";
         repo = "xnu";
         rev = "xnu-1228";
-        hash = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8="; # <--- THIS IS THE OLD ONE
+        hash = "sha256-77fddC7Udhh4uuqCJuoyeAuRCNJiNBpZZgivOM8p1gU=";
       };
     in
     {
