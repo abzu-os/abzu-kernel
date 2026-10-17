@@ -27,8 +27,8 @@
         version = "1228";
         src = xnu-src;
 
-        # Added coreutils to guarantee pwd is available
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
+        # Added procps to provide the 'sysctl' command on Linux
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.procps clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -39,12 +39,14 @@
           find . -type f -exec sed -i 's|/usr/bin/config|config|g' {} +
           find . -type f -exec sed -i 's|/usr/sbin/config|config|g' {} +
           find . -type f -exec sed -i 's|/bin/pwd|pwd|g' {} +
+          find . -type f -exec sed -i 's|/usr/sbin/sysctl|sysctl|g' {} +
           
           echo "=== DEBUG: Verifying patches ==="
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/config" . && echo "ERROR: /usr/bin/config still hardcoded!" || echo "SUCCESS: /usr/bin/config patched"
           grep -rn "/usr/sbin/config" . && echo "ERROR: /usr/sbin/config still hardcoded!" || echo "SUCCESS: /usr/sbin/config patched"
           grep -rn "/bin/pwd" . && echo "ERROR: /bin/pwd still hardcoded!" || echo "SUCCESS: /bin/pwd patched"
+          grep -rn "/usr/sbin/sysctl" . && echo "ERROR: /usr/sbin/sysctl still hardcoded!" || echo "SUCCESS: /usr/sbin/sysctl patched"
           
           runHook postPatch
         '';
@@ -70,6 +72,7 @@
           command -v config || echo "WARNING: config not found in PATH!"
           command -v relpath || echo "WARNING: relpath not found in PATH!"
           command -v pwd || echo "WARNING: pwd not found in PATH!"
+          command -v sysctl || echo "WARNING: sysctl not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
           export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
