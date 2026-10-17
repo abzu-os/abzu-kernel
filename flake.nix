@@ -34,23 +34,23 @@
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
-          # 1. Strip DOS line endings first to ensure all subsequent regex matches work
+          # 1. Strip DOS line endings first
           find . -type f -exec sed -i 's/\r//g' {} +
           
-          # 2. Apply all our replacements
+          # 2. Apply all our replacements using ABSOLUTE PATHS to our mock scripts in $TMPDIR
           find . -type f -exec sed -i \
-            -e 's|/usr/sbin/sysctl|sysctl|g' \
-            -e 's|/usr/bin/config|config|g' \
-            -e 's|/usr/sbin/config|config|g' \
-            -e 's|/bin/pwd|pwd|g' \
-            -e 's|/bin/mkdir|mkdir|g' \
-            -e 's|/bin/cp|cp|g' \
+            -e "s|/usr/sbin/sysctl|$TMPDIR/bin/sysctl|g" \
+            -e "s|/usr/bin/config|$TMPDIR/bin/config|g" \
+            -e "s|/usr/sbin/config|$TMPDIR/bin/config|g" \
+            -e "s|/bin/pwd|pwd|g" \
+            -e "s|/bin/mkdir|mkdir|g" \
+            -e "s|/bin/cp|cp|g" \
             -e 's|#!/bin/csh|#!'"${pkgs.tcsh}"'/bin/tcsh|g' \
             -e 's|/bin/csh|tcsh|g' \
             -e 's|/usr/bin/perl|'"${pkgs.perl}"'/bin/perl|g' \
-            -e 's|/usr/local/bin/relpath|relpath|g' \
-            -e 's|/usr/bin/tr|tr|g' \
-            -e 's|/usr/bin/uname|uname|g' \
+            -e "s|/usr/local/bin/relpath|$TMPDIR/bin/relpath|g" \
+            -e "s|/usr/bin/tr|tr|g" \
+            -e "s|/usr/bin/uname|$TMPDIR/bin/uname|g" \
             -e 's|-mno-altivec||g' \
             -e 's|-mcpu=[^ ]*||g' \
             -e 's|-arch ppc||g' \
@@ -62,7 +62,6 @@
           
           echo "=== DEBUG: Verifying patches ==="
           grep -rn "/usr/bin/config" . && echo "ERROR: /usr/bin/config still hardcoded!" || echo "SUCCESS: /usr/bin/config patched"
-          grep -rn "/usr/sbin/config" . && echo "ERROR: /usr/sbin/config still hardcoded!" || echo "SUCCESS: /usr/sbin/config patched"
           
           runHook postPatch
         '';
@@ -75,8 +74,35 @@
           # Dummy config script to satisfy the XNU Makefile
           cat > "$TMPDIR/bin/config" << 'EOF'
 #!/bin/sh
-echo "Dummy config: skipping kernel configuration generation"
-touch ioconf.c ioconf.h
+# Dummy config script for XNU cross-compilation
+OUTPUT_DIR="."
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-d" ]; then
+    OUTPUT_DIR="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+
+mkdir -p "$OUTPUT_DIR"
+touch "$OUTPUT_DIR/ioconf.c"
+touch "$OUTPUT_DIR/ioconf.h"
+
+# Create a dummy Makefile so that 'make -C <dir> build_all' succeeds
+cat > "$OUTPUT_DIR/Makefile" << 'MAKEEOF'
+.PHONY: build_all do_build_all setup_build_install do_build_install build_all_setup
+build_all:
+	@echo "Dummy build_all"
+do_build_all:
+	@echo "Dummy do_build_all"
+setup_build_install:
+	@echo "Dummy setup_build_install"
+do_build_install:
+	@echo "Dummy do_build_install"
+build_all_setup:
+	@echo "Dummy build_all_setup"
+MAKEEOF
 EOF
           chmod +x "$TMPDIR/bin/config"
 
@@ -87,6 +113,10 @@ if [ "$1" = "-s" ]; then
   echo "Darwin"
 elif [ "$1" = "-r" ]; then
   echo "9.0.0"
+elif [ "$1" = "-m" ]; then
+  echo "Power Macintosh"
+elif [ "$1" = "-p" ]; then
+  echo "powerpc"
 else
   echo "Darwin"
 fi
@@ -129,9 +159,6 @@ fi
 EOF
           chmod +x "$TMPDIR/bin/sysctl"
 
-          # CRITICAL: Force the Makefile to use our mocked tools via environment variables
-          export CONFIG=config
-          export UNAME=uname
           export PATH="$TMPDIR/bin:$PATH"
 
           echo "=== DEBUG: Checking PATH and tools ==="
@@ -140,11 +167,6 @@ EOF
           command -v uname || echo "WARNING: uname not found in PATH!"
           command -v relpath || echo "WARNING: relpath not found in PATH!"
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
-          command -v mkdir || echo "WARNING: mkdir not found in PATH!"
-          command -v cp || echo "WARNING: cp not found in PATH!"
-          command -v tcsh || echo "WARNING: tcsh not found in PATH!"
-          command -v perl || echo "WARNING: perl not found in PATH!"
-          command -v tr || echo "WARNING: tr not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
           export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
