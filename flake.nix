@@ -27,14 +27,14 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.procps clang lld ];
+        # Removed procps since we are mocking sysctl
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
-          # Target every known variation of these paths, including double slashes
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
             -e 's|/usr/sbin//sysctl|sysctl|g' \
@@ -62,15 +62,33 @@
           runHook preBuild
 
           mkdir -p "$TMPDIR/bin"
+          
+          # Mock relpath
           {
             echo '#!/bin/sh'
-            echo '# relpath target base -- print target path relative to base'
             echo 'exec ${pkgs.python3}/bin/python3 -c "'
             echo 'import os, sys'
             echo "print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else '.'))"
             echo '" "$@"'
           } > "$TMPDIR/bin/relpath"
           chmod +x "$TMPDIR/bin/relpath"
+
+          # Mock sysctl to return plausible macOS values for the build system
+          {
+            echo '#!/bin/sh'
+            echo 'case "$1" in'
+            echo '  hw.logicalcpu) echo "hw.logicalcpu: 4" ;;'
+            echo '  hw.physicalcpu) echo "hw.physicalcpu: 4" ;;'
+            echo '  hw.memsize) echo "hw.memsize: 4294967296" ;;'
+            echo '  hw.ncpu) echo "hw.ncpu: 4" ;;'
+            echo '  hw.activecpu) echo "hw.activecpu: 4" ;;'
+            echo '  hw.cpufrequency) echo "hw.cpufrequency: 2000000000" ;;'
+            echo '  hw.cachelinesize) echo "hw.cachelinesize: 64" ;;'
+            echo '  hw.pagesize) echo "hw.pagesize: 4096" ;;'
+            echo '  *) echo "sysctl: unknown oid ''$1" >&2; exit 1 ;;'
+            echo 'esac'
+          } > "$TMPDIR/bin/sysctl"
+          chmod +x "$TMPDIR/bin/sysctl"
 
           export PATH="$TMPDIR/bin:$PATH"
 
