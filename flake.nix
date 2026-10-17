@@ -27,7 +27,8 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
+        # Added bsdextrautils to provide the 'config' command in the Nix sandbox
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.bsdextrautils clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -45,6 +46,7 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
+            -e 's|/usr/bin/tr|tr|g' \
             {} +
           
           echo "=== DEBUG: Verifying patches ==="
@@ -53,6 +55,7 @@
           grep -rn "/bin/pwd" . && echo "ERROR: pwd still hardcoded!" || echo "SUCCESS: pwd patched"
           grep -rn "/bin/mkdir" . && echo "ERROR: mkdir still hardcoded!" || echo "SUCCESS: mkdir patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
+          grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
           
           runHook postPatch
         '';
@@ -107,6 +110,7 @@ EOF
           command -v pwd || echo "WARNING: pwd not found in PATH!"
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
           command -v mkdir || echo "WARNING: mkdir not found in PATH!"
+          command -v tr || echo "WARNING: tr not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
           export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
