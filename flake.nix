@@ -35,7 +35,7 @@
       # (not fetchurl) is required here: github.com archive URLs
       # redirect to codeload.github.com, which Nix refuses to download
       # with plain fetchurl because it cannot be authenticated.
-      xnu-src = pkgs.fetchFromGitHub {
+        xnu-src = pkgs.fetchFromGitHub {
         owner = "apple-oss-distributions";
         repo = "xnu";
         rev = "xnu-1228";
