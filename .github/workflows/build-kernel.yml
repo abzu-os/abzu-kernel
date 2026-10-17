@@ -7,10 +7,16 @@ on:
 
 jobs:
   build:
-    runs-on: macos-12  # <--- CHANGE THIS LINE
+    # Switch to Linux: Instant queues, no Intel Mac dependency, true cross-compilation
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install BSD config utility (required by XNU build system)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bsdmainutils
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
