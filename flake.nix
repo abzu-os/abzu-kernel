@@ -63,42 +63,39 @@
           mkdir -p "$TMPDIR/bin"
           
           # Mock relpath
-          {
-            echo '#!/bin/sh'
-            echo 'exec ${pkgs.python3}/bin/python3 -c "'
-            echo 'import os, sys'
-            echo "print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else '.'))"
-            echo '" "$@"'
-          } > "$TMPDIR/bin/relpath"
+          cat > "$TMPDIR/bin/relpath" << 'EOF'
+#!/bin/sh
+exec ${pkgs.python3}/bin/python3 -c "import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else '.'))" "$@"
+EOF
           chmod +x "$TMPDIR/bin/relpath"
 
           # Mock sysctl to handle the -n flag and return plausible macOS values
-          {
-            echo '#!/bin/sh'
-            echo 'PRINT_VALUE_ONLY=0'
-            echo 'if [ "$1" = "-n" ]; then'
-            echo '  PRINT_VALUE_ONLY=1'
-            echo '  shift'
-            echo 'fi'
-            echo 'OID=$1'
-            echo 'VALUE=""'
-            echo 'case "$OID" in'
-            echo '  hw.logicalcpu) VALUE="4" ;;'
-            echo '  hw.physicalcpu) VALUE="4" ;;'
-            echo '  hw.memsize) VALUE="4294967296" ;;'
-            echo '  hw.ncpu) VALUE="4" ;;'
-            echo '  hw.activecpu) VALUE="4" ;;'
-            echo '  hw.cpufrequency) VALUE="2000000000" ;;'
-            echo '  hw.cachelinesize) VALUE="64" ;;'
-            echo '  hw.pagesize) VALUE="4096" ;;'
-            echo '  *) echo "sysctl: unknown oid '\''$OID'\''" >&2; exit 1 ;;'
-            echo 'esac'
-            echo 'if [ "$PRINT_VALUE_ONLY" -eq 1 ]; then'
-            echo '  echo "$VALUE"'
-            echo 'else'
-            echo '  echo "$OID: $VALUE"'
-            echo 'fi'
-          } > "$TMPDIR/bin/sysctl"
+          cat > "$TMPDIR/bin/sysctl" << 'EOF'
+#!/bin/sh
+PRINT_VALUE_ONLY=0
+if [ "$1" = "-n" ]; then
+  PRINT_VALUE_ONLY=1
+  shift
+fi
+OID=$1
+VALUE=""
+case "$OID" in
+  hw.logicalcpu) VALUE="4" ;;
+  hw.physicalcpu) VALUE="4" ;;
+  hw.memsize) VALUE="4294967296" ;;
+  hw.ncpu) VALUE="4" ;;
+  hw.activecpu) VALUE="4" ;;
+  hw.cpufrequency) VALUE="2000000000" ;;
+  hw.cachelinesize) VALUE="64" ;;
+  hw.pagesize) VALUE="4096" ;;
+  *) echo "sysctl: unknown oid '$OID'" >&2; exit 1 ;;
+esac
+if [ "$PRINT_VALUE_ONLY" -eq 1 ]; then
+  echo "$VALUE"
+else
+  echo "$OID: $VALUE"
+fi
+EOF
           chmod +x "$TMPDIR/bin/sysctl"
 
           export PATH="$TMPDIR/bin:$PATH"
