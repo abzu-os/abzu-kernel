@@ -12,11 +12,14 @@
 
       pkgs = import nixpkgs {
         inherit system crossSystem;
+        # CRITICAL: Tell Nix to allow building for powerpc-darwin even if 
+        # it's not on the official "fully tested" list for every package.
+        config.allowUnsupportedSystem = true;
       };
       
-      # CRITICAL FIX: Use buildPackages to get the HOST's LLVM (aarch64-darwin)
-      # This is the compiler that will run on the GitHub runner and output PPC code.
-      llvm = pkgs.buildPackages.llvmPackages_18;
+      # pkgs.clang is the cross-compiler (runs on aarch64-darwin, targets powerpc-darwin)
+      clang = pkgs.clang;
+      lld = pkgs.lld;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -29,15 +32,14 @@
         version = "1228";
         src = xnu-src;
 
-        # nativeBuildInputs run on the build machine. 
-        # We explicitly pull gnumake from buildPackages as well.
-        nativeBuildInputs = [ pkgs.buildPackages.gnumake llvm.clang llvm.lld ];
+        # gnumake runs on the build machine, clang/lld are the cross-tools
+        nativeBuildInputs = [ pkgs.buildPackages.gnumake clang lld ];
 
         buildPhase = ''
           runHook preBuild
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
-               CC=${llvm.clang}/bin/clang \
-               LD=${llvm.lld}/bin/ld.lld \
+               CC=${clang}/bin/clang \
+               LD=${lld}/bin/ld.lld \
                SDKROOT=/
           runHook postBuild
         '';
