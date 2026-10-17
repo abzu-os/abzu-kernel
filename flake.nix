@@ -27,21 +27,24 @@
         version = "1228";
         src = xnu-src;
 
-        # Added procps (for sysctl) and coreutils (for mkdir, pwd)
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.procps clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
-          echo "=== DEBUG: Surgically patching hardcoded paths using GNU sed ==="
+          echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
-          # Replace specific absolute paths with their command equivalents
+          # Target every known variation of these paths, including double slashes
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
+            -e 's|/usr/sbin//sysctl|sysctl|g' \
             -e 's|/usr/bin/config|config|g' \
             -e 's|/usr/sbin/config|config|g' \
+            -e 's|/usr/sbin//config|config|g' \
             -e 's|/bin/pwd|pwd|g' \
+            -e 's|/bin//pwd|pwd|g' \
             -e 's|/bin/mkdir|mkdir|g' \
+            -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             {} +
           
