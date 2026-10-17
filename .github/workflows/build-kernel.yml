@@ -18,13 +18,20 @@ jobs:
       - name: Build Kernel
         run: nix build .#abzu-xnu-10-5-8
 
-      - name: Prepare Artifact
+      - name: Prepare Artifact (Detective Mode)
         run: |
-          # Create a dedicated folder to avoid Nix symlink confusion
           mkdir -p artifacts
-          # Copy the built kernel into the folder
-          cp result/mach_kernel artifacts/mach_kernel
-          # Prove to GitHub that the file is there
+          
+          echo "=== DEBUG: Listing everything in the 'result' directory ==="
+          ls -lR result/
+          
+          echo "=== DEBUG: Searching for any file with 'kernel' or 'mach' in the name ==="
+          find result/ -type f \( -name "*kernel*" -o -name "*mach*" \)
+          
+          # Copy any matching files into the artifacts folder
+          find result/ -type f \( -name "*kernel*" -o -name "*mach*" \) -exec cp {} artifacts/ \; || true
+          
+          echo "=== DEBUG: Final contents of artifacts folder ==="
           ls -lh artifacts/
 
       - name: Upload Kernel Artifact
@@ -32,6 +39,4 @@ jobs:
         with:
           name: abzu-mach_kernel-ppc
           path: artifacts/
-          # This forces the workflow to fail if the file is missing, 
-          # preventing the "silent success" with no artifact.
           if-no-files-found: error
