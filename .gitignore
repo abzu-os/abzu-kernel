@@ -1,8 +1,1 @@
 *.log
-*.tmp
-*.swp
-.env
-.env.local
-.env.*
-.vscode/
-.idea/
