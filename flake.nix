@@ -25,14 +25,14 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake clang lld ];
+        # Added pkgs.perl here so Nix knows to put it in the PATH
+        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.perl ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
           
           echo "Patching hardcoded paths in XNU Makefiles..."
-          # perl -pi -e is the universal, cross-platform way to do in-place sed replacements
           find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} +
           find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/bin/config|config|g' {} +
           
