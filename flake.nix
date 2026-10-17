@@ -25,14 +25,23 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.perl pkgs.gnugrep pkgs.findutils ];
+        # Added gnused for 100% reliable in-place editing across all platforms
+        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.gnused pkgs.gnugrep pkgs.findutils ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
-          echo "Patching hardcoded paths in ALL files..."
-          find . -type f -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} \;
-          find . -type f -exec perl -pi -e 's|/usr/bin/config|config|g' {} \;
+          echo "=== DEBUG: Patching hardcoded paths using GNU sed ==="
+          
+          find . -type f -exec sed -i 's|/usr/local/bin/relpath|relpath|g' {} +
+          find . -type f -exec sed -i 's|/usr/bin/config|config|g' {} +
+          find . -type f -exec sed -i 's|/usr/sbin/config|config|g' {} +
+          
+          echo "=== DEBUG: Verifying patches ==="
+          grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
+          grep -rn "/usr/bin/config" . && echo "ERROR: /usr/bin/config still hardcoded!" || echo "SUCCESS: /usr/bin/config patched"
+          grep -rn "/usr/sbin/config" . && echo "ERROR: /usr/sbin/config still hardcoded!" || echo "SUCCESS: /usr/sbin/config patched"
+          
           runHook postPatch
         '';
 
@@ -41,15 +50,18 @@
           
           mkdir -p $TMPDIR/bin
           cat > $TMPDIR/bin/relpath << 'EOF'
-#!/usr/bin/env perl
-use File::Spec;
-my $path = shift;
-my $base = shift || ".";
-print File::Spec->abs2rel($path, $base), "\n";
+#!/usr/bin/env bash
+python3 -c "import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv)>2 else '.'))" "$1" "$2"
 EOF
           chmod +x $TMPDIR/bin/relpath
           
-          export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$TMPDIR/bin:$PATH"
+          # Ensure system config (in /usr/sbin) and our relpath are in PATH
+          export PATH="/usr/sbin:/usr/bin:/bin:/sbin:$TMPDIR/bin:$PATH"
+          
+          echo "=== DEBUG: Checking PATH and tools ==="
+          echo "PATH is: $PATH"
+          which config || echo "WARNING: config not found in PATH!"
+          which relpath || echo "WARNING: relpath not found in PATH!"
           
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
                CC="${clang}/bin/clang -target powerpc-apple-darwin -m32" \
