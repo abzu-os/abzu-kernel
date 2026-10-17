@@ -37,10 +37,18 @@
         # (Mac OS X 10.5.6), so we pin that as the newest 10.5-series
         # snapshot available on GitHub.
         rev = "xnu-1228.7.58";
-        # FIXED: hash regenerated for the new rev by downloading the exact
-        # codeload tarball GitHub serves for this tag and converting its
-        # sha256 to SRI base64 (nix hash convert). It now matches the rev.
-        hash = "sha256-bfXasqCAIqHWx+r96Cm6oH0pawt1P+VDwyFetGGFc5o=";
+        # FIXED (CI run 2026-10-17, "hash mismatch in fixed-output
+        # derivation '...-source.drv'"): fetchFromGitHub's *output* is the
+        # extracted source tree, so the pinned hash must be Nix's
+        # recursive dump-hash of that tree -- NOT the sha256 of the raw
+        # codeload tarball. The previous value was computed by hashing the
+        # .tar.gz bytes directly (hex 6df5dab2... == SRI
+        # sha256-bfXasqCAIqHWx+r96Cm6oH0pawt1P+VDwyFetGGFc5o=), which can
+        # never match and aborted every build at the fetch stage.
+        # The value below is exactly what Nix reported as the real output
+        # hash of this rev ("got:" / Determinate's "use ..." hint) in the
+        # failing job log.
+        hash = "sha256-/VNOskKGMt1OFra0cLQhsbDufVtGM0FJ7WjtWXa1CgE=";
       };
 
       # ------------------------------------------------------------------
@@ -377,8 +385,13 @@ EOF
           # if buildPhase had already produced the object files this was
           # just wasted work, and if it hadn't (because failures were
           # ignored) it re-failed obscurely. Now buildPhase fails fast, so
-          # here we only finish/install the kernel image.
-          make INSTALLDIR="\$PWD/BUILD/obj" installkernel || true
+          # here we only finish/install the kernel image. NOTE: XNU 1228's
+          # top-level Makefile has no `installkernel` target -- invoking it
+          # aborted with "No rule to make target 'installkernel'" *before*
+          # reaching the following mach_kernel detection, turning an
+          # already-successful build into a spurious failure. The PPC
+          # install rules run as part of `make kernel` itself, so nothing
+          # extra is required here; keep the copy-only step below.
 
           echo "=== DEBUG: Listing main build output directory ==="
           ls -lh BUILD/obj/RELEASE_PPC/ || true
