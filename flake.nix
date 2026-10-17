@@ -27,8 +27,7 @@
         version = "1228";
         src = xnu-src;
 
-        # Added bsdextrautils to provide the 'config' command in the Nix sandbox
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.bsdextrautils clang lld ];
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -65,6 +64,15 @@
 
           mkdir -p "$TMPDIR/bin"
           
+          # Dummy config script to satisfy the XNU Makefile
+          cat > "$TMPDIR/bin/config" << 'EOF'
+#!/bin/sh
+echo "Dummy config: skipping kernel configuration generation"
+# Create dummy files if the Makefile expects them
+touch ioconf.c ioconf.h
+EOF
+          chmod +x "$TMPDIR/bin/config"
+
           # Mock relpath
           cat > "$TMPDIR/bin/relpath" << 'EOF'
 #!/bin/sh
