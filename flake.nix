@@ -7,12 +7,16 @@
 
   outputs = { self, nixpkgs }:
     let
-      system = "aarch64-darwin";
+      # We are building ON Linux (x86_64-linux), FOR PowerPC Darwin
+      system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       
-      llvm = pkgs.llvmPackages_18;
-      clang = llvm.clang-unwrapped;
-      lld = llvm.lld;
+      # Use the cross-compilation package set for PowerPC Darwin
+      pkgsCross = pkgs.pkgsCross.powerpc-darwin;
+      
+      # Use the unwrapped clang from the cross-compiler set
+      clang = pkgsCross.llvmPackages.clang-unwrapped;
+      lld = pkgsCross.llvmPackages.lld;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
@@ -25,8 +29,11 @@
         version = "1228";
         src = xnu-src;
 
-        # Added gnused for 100% reliable in-place editing across all platforms
-        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.gnused pkgs.gnugrep pkgs.findutils ];
+        # Native build inputs run on the Linux host
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils ];
+        
+        # We need the cross-compiler for the actual build
+        buildInputs = [ clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -55,7 +62,7 @@ python3 -c "import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2] if le
 EOF
           chmod +x $TMPDIR/bin/relpath
           
-          # Ensure system config (in /usr/sbin) and our relpath are in PATH
+          # Ensure system config (in /usr/sbin on Ubuntu) and our relpath are in PATH
           export PATH="/usr/sbin:/usr/bin:/bin:/sbin:$TMPDIR/bin:$PATH"
           
           echo "=== DEBUG: Checking PATH and tools ==="
