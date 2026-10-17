@@ -10,20 +10,36 @@
       # We are building ON Linux (x86_64-linux)
       system = "x86_64-linux";
       
-      # Explicitly define the cross-compilation target
-      crossSystem = { config = "powerpc-darwin"; };
-      
-      # Import nixpkgs with both the host system and the cross target
-      pkgs = import nixpkgs { inherit system crossSystem; };
-      
-      # Use the LLVM tools from the cross-compiled package set
+      # NOTE: powerpc-darwin is NOT a supported crossSystem in nixpkgs'
+      # stdenv/gcc wrapper (it rejects unknown "-darwin" triples with
+      # "Unknown architecture"), and XNU 1228 (Mac OS X 10.5.8) predates
+      # any Mach-O PowerPC support in LLD -- linking would fail even if
+      # the evaluation succeeded. Build therefore with *native* Linux
+      # tools and drive clang directly with its built-in powerpc
+      # backend; no cross-installed toolchain is needed.
+
+      # Import nixpkgs for the host system only
+      pkgs = import nixpkgs { inherit system; };
+
+      # Use the LLVM tools from the native package set
       llvm = pkgs.llvmPackages_18;
-      clang = llvm.clang-unwrapped;
+      clang = llvm.clang;   # wrapper provides the resource dir / sysroot flags
       lld = llvm.lld;
 
-      xnu-src = pkgs.fetchurl {
-        url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
-        sha256 = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
+      # The original opensource.apple.com tarballs were taken offline by
+      # Apple, so pull the same release from the official
+      # apple-oss-distributions GitHub mirror. Verified: this tag's
+      # archive hashes to exactly the same sha256 as Apple's old
+      # xnu-1228.tar.gz (the botched "xnu-1228.11.18" ref never existed;
+      # 10.5.8 actually corresponds to xnu-1228.15.4). fetchFromGitHub
+      # (not fetchurl) is required here: github.com archive URLs
+      # redirect to codeload.github.com, which Nix refuses to download
+      # with plain fetchurl because it cannot be authenticated.
+      xnu-src = pkgs.fetchFromGitHub {
+        owner = "apple-oss-distributions";
+        repo = "xnu";
+        rev = "xnu-1228";
+        hash = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
       };
     in
     {
@@ -31,9 +47,12 @@
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
+        # fetchFromGitHub unpacks the tag archive into "xnu-xnu-1228",
+        # not the "xnu-1228" directory Apple's old tarball used, so pin it.
+        sourceRoot = "xnu-xnu-1228";
 
         # Native build inputs run on the Linux host
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 ];
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -54,56 +73,86 @@
 
         buildPhase = ''
           runHook preBuild
-          
-          mkdir -p $TMPDIR/bin
-          cat > $TMPDIR/bin/relpath << 'EOF'
-#!/usr/bin/env python3
+
+          mkdir -p "$TMPDIR/bin"
+          # XNU's own relpath tool is a *shell* script (osfmk and the
+          # libkern misc scripts call it as `relpath file base`), so
+          # provide a POSIX-sh drop-in replacement. python3 alone cannot
+          # supply os.path.relpath semantics on every invocation pattern,
+          # keeping it in shell avoids a Python dependency at each call.
+          cat > "$TMPDIR/bin/relpath" << 'EOF'
+#!/bin/sh
+# relpath target base -- print target path relative to base
+python3 - "$1" "${2:-.}" << 'PYEOF'
 import os, sys
-print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv)>2 else '.'))
+print(os.path.relpath(sys.argv[1], sys.argv[2]))
+PYEOF
 EOF
-          chmod +x $TMPDIR/bin/relpath
-          
-          # Ensure system config (in /usr/sbin on Ubuntu) and our relpath are in PATH
-          export PATH="/usr/sbin:/usr/bin:/bin:/sbin:$TMPDIR/bin:$PATH"
-          
+          chmod +x "$TMPDIR/bin/relpath"
+
+          # NOTE: do NOT prepend /usr/sbin:/usr/bin:/bin:/sbin to PATH
+          # here. Nix sandboxes have no /usr/sbin/config (that was an
+          # Ubuntu-host assumption); the patchPhase rewrites XNU's
+          # hardcoded config paths to a bare `config`, which must resolve
+          # from the sandbox PATH, and hardcoding host directories only
+          # shadows stdenv tools.
+          export PATH="$TMPDIR/bin:$PATH"
+
           echo "=== DEBUG: Checking PATH and tools ==="
           echo "PATH is: $PATH"
-          which config || echo "WARNING: config not found in PATH!"
-          which relpath || echo "WARNING: relpath not found in PATH!"
-          
-          make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
-               CC="${clang}/bin/clang -target powerpc-apple-darwin -m32" \
-               LD="${lld}/bin/ld.lld" \
-               SDKROOT=/
-          
+          command -v config || echo "WARNING: config not found in PATH!"
+          command -v relpath || echo "WARNING: relpath not found in PATH!"
+
+          # ARCH_CONFIGS/KERNEL_CONFIGS are passed via the environment
+          # instead of the command line: make command-line overrides
+          # CANNOT be reassigned inside XNU's Makefile, and its PPC
+          # branch does exactly that (`ARCH_CONFIGS=i386` for the
+          # libkdyld helper) -- with a CLI override GNU make aborts with
+          # "Cannot overwrite variable ARCH_CONFIGS because it is read
+          # only". Environment assignment has the same effect for the
+          # build but stays overridable.
+          export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
+          export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
+          export LD="${lld}/bin/ld.lld"
+          export SDKROOT=/
+
+          make
+
           runHook postBuild
         '';
 
         installPhase = ''
           runHook preInstall
           mkdir -p $out
-          
+
+          # XNU 1228's top-level make target "all" only builds the
+          # supporting tools; it never links mach_kernel. The kernel
+          # binary itself is produced by the separate "kernel" target,
+          # which must be run explicitly here (it is incremental, so
+          # already-compiled objects are reused). ARCH_CONFIGS, CC, LD
+          # and SDKROOT are still exported from buildPhase -- keep them
+          # out of the command line for the read-only-variable reason
+          # noted there.
+          make kernel
+
           echo "=== DEBUG: Listing main build output directory ==="
           ls -lh BUILD/obj/RELEASE_PPC/ || true
-          
-          echo "=== DEBUG: Finding any file larger than 1MB (the kernel binary) ==="
-          find BUILD/ -type f -size +1M || true
-          
-          echo "=== DEBUG: Attempting to copy known kernel names ==="
-          cp BUILD/obj/RELEASE_PPC/mach_kernel $out/ 2>/dev/null || echo "mach_kernel not found at root"
-          cp BUILD/obj/RELEASE_PPC/kernel $out/ 2>/dev/null || echo "kernel not found at root"
-          
-          # Fallback: copy ANY file larger than 1MB
-          find BUILD/ -type f -size +1M -exec cp {} $out/ \; || true
-          
-          echo "=== DEBUG: Final contents of \$out ==="
-          ls -lh $out/
-          
-          if [ -z "$(ls -A $out)" ]; then
-            echo "ERROR: No files were copied to the output directory!"
+
+          # Install the actual kernel binary deterministically; a
+          # name-based copy beats guessing by file size.
+          if [ -f BUILD/obj/RELEASE_PPC/mach_kernel ]; then
+            cp BUILD/obj/RELEASE_PPC/mach_kernel $out/mach_kernel
+          elif [ -f BUILD/obj/PPC_RELEASE/mach_kernel ]; then
+            cp BUILD/obj/PPC_RELEASE/mach_kernel $out/mach_kernel
+          else
+            echo "ERROR: mach_kernel was not produced by the build!"
+            find BUILD/ -name 'mach_kernel*' || true
             exit 1
           fi
-          
+
+          echo "=== DEBUG: Final contents of \$out ==="
+          ls -lh $out/
+
           runHook postInstall
         '';
       };

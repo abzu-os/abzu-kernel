@@ -13,10 +13,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install BSD config utility (required by XNU build system)
+      - name: Install build utilities required by the XNU build system
         run: |
           sudo apt-get update
-          sudo apt-get install -y bsdmainutils
+          # NOTE: `config` (the BSD kernel-config script XNU invokes) is
+          # NOT provided by bsdmainutils -- that package only ships
+          # calendar/hexdump etc. and does not exist at all on current
+          # Ubuntu runners, so installing it fails the whole job with
+          # "Unable to locate package". The flake's patchPhase rewrites
+          # the hardcoded /usr/bin/config and /usr/sbin/config paths in
+          # XNU's makefiles to a bare `config`, which must then resolve
+          # from PATH inside the Nix sandbox; no host package is needed
+          # (and even if it were, apt packages cannot cross the Nix
+          # sandbox boundary into nix build).
+          sudo apt-get install -y bsdextrautils findutils
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -27,18 +37,24 @@ jobs:
       - name: Prepare Artifact
         run: |
           mkdir -p artifacts
-          echo "=== DEBUG: Listing main build output directory ==="
-          ls -lh BUILD/obj/RELEASE_PPC/ || true
-          
-          echo "=== DEBUG: Finding any file larger than 1MB ==="
-          find BUILD/ -type f -size +1M || true
-          
-          cp BUILD/obj/RELEASE_PPC/mach_kernel artifacts/ 2>/dev/null || echo "mach_kernel not found at root"
-          cp BUILD/obj/RELEASE_PPC/kernel artifacts/ 2>/dev/null || echo "kernel not found at root"
-          find BUILD/ -type f -size +1M -exec cp {} artifacts/ \; || true
-          
+          # After `nix build`, BUILD/ does not exist in the workspace --
+          # it lives inside the Nix store during the build. The only
+          # output visible to CI is the result symlink created by
+          # `nix build .#abzu-xnu-10-5-8`, whose top level contains the
+          # installed mach_kernel. Copying from result/ is what actually
+          # works here; the old BUILD/-based copies silently produced an
+          # empty artifacts dir, which then failed upload-artifact's
+          # if-no-files-found: error check.
+          echo "=== DEBUG: Listing nix build result ==="
+          ls -lhR result/ || true
+
+          cp result/mach_kernel artifacts/ 2>/dev/null \
+            || find result/ -type f -exec cp -t artifacts/ {} + \
+            || echo "ERROR: nothing found in result/"
+
           echo "=== DEBUG: Final contents of artifacts ==="
           ls -lh artifacts/
+          test -s artifacts/mach_kernel || { echo "ERROR: artifacts/mach_kernel missing or empty"; exit 1; }
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
