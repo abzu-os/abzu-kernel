@@ -11,9 +11,6 @@
       pkgs = import nixpkgs { inherit system; };
       
       llvm = pkgs.llvmPackages_18;
-      
-      # CRITICAL FIX: Use the unwrapped clang to prevent Nix's cc-wrapper 
-      # from injecting conflicting host architecture flags.
       clang = llvm.clang-unwrapped;
       lld = llvm.lld;
 
@@ -46,7 +43,25 @@
         installPhase = ''
           runHook preInstall
           mkdir -p $out
-          find BUILD -name "mach_kernel" -exec cp {} $out/ \; || true
+          
+          echo "=== DEBUG installPhase: Listing BUILD directory ==="
+          ls -lR BUILD/
+          
+          echo "=== DEBUG installPhase: Finding kernel files ==="
+          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \)
+          
+          # Try to copy whatever looks like a kernel
+          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \) -exec cp {} $out/ \; || true
+          
+          echo "=== DEBUG installPhase: Final contents of \$out ==="
+          ls -lh $out/
+          
+          # INTENTIONALLY FAIL if empty, so Nix prints the debug logs above!
+          if [ -z "$(ls -A $out)" ]; then
+            echo "ERROR: No kernel files found in BUILD directory!"
+            exit 1
+          fi
+          
           runHook postInstall
         '';
       };
