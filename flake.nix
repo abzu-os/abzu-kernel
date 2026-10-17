@@ -7,7 +7,6 @@
 
   outputs = { self, nixpkgs }:
     let
-      # We use the native host system, avoiding crossSystem entirely
       system = "aarch64-darwin";
       pkgs = import nixpkgs { inherit system; };
       
@@ -15,7 +14,8 @@
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
-        sha256 = "0000000000000000000000000000000000000000000000000000";
+        # THE REAL HASH!
+        sha256 = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
       };
     in
     {
@@ -25,15 +25,12 @@
         src = xnu-src;
 
         nativeBuildInputs = [ pkgs.gnumake llvm.clang llvm.lld ];
-
-        # Disable Nixpkgs default hardening, which can interfere with manual cross-compilation
         hardeningDisable = [ "all" ];
 
         buildPhase = ''
           runHook preBuild
           
           # Manually force Clang to target 32-bit PowerPC macOS
-          # -m32 ensures it generates 32-bit code, -target sets the OS/Arch
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
                CC="${llvm.clang}/bin/clang -target powerpc-apple-darwin -m32" \
                LD="${llvm.lld}/bin/ld.lld" \
