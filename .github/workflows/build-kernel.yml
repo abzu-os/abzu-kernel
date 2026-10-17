@@ -18,8 +18,20 @@ jobs:
       - name: Build Kernel
         run: nix build .#abzu-xnu-10-5-8
 
+      - name: Prepare Artifact
+        run: |
+          # Create a dedicated folder to avoid Nix symlink confusion
+          mkdir -p artifacts
+          # Copy the built kernel into the folder
+          cp result/mach_kernel artifacts/mach_kernel
+          # Prove to GitHub that the file is there
+          ls -lh artifacts/
+
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: abzu-mach_kernel-ppc
-          path: result/mach_kernel
+          path: artifacts/
+          # This forces the workflow to fail if the file is missing, 
+          # preventing the "silent success" with no artifact.
+          if-no-files-found: error
