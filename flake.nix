@@ -27,7 +27,8 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
+        # Added perl and tcsh (provides csh) to nativeBuildInputs
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -45,6 +46,8 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
+            -e 's|/bin/csh|csh|g' \
+            -e 's|/usr/bin/perl|perl|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
             {} +
@@ -55,6 +58,8 @@
           grep -rn "/bin/pwd" . && echo "ERROR: pwd still hardcoded!" || echo "SUCCESS: pwd patched"
           grep -rn "/bin/mkdir" . && echo "ERROR: mkdir still hardcoded!" || echo "SUCCESS: mkdir patched"
           grep -rn "/bin/cp" . && echo "ERROR: cp still hardcoded!" || echo "SUCCESS: cp patched"
+          grep -rn "/bin/csh" . && echo "ERROR: csh still hardcoded!" || echo "SUCCESS: csh patched"
+          grep -rn "/usr/bin/perl" . && echo "ERROR: perl still hardcoded!" || echo "SUCCESS: perl patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
           
@@ -121,6 +126,8 @@ EOF
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
           command -v mkdir || echo "WARNING: mkdir not found in PATH!"
           command -v cp || echo "WARNING: cp not found in PATH!"
+          command -v csh || echo "WARNING: csh not found in PATH!"
+          command -v perl || echo "WARNING: perl not found in PATH!"
           command -v tr || echo "WARNING: tr not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
