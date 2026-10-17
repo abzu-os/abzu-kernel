@@ -77,17 +77,19 @@
           mkdir -p "$TMPDIR/bin"
           # XNU's own relpath tool is a *shell* script (osfmk and the
           # libkern misc scripts call it as `relpath file base`), so
-          # provide a POSIX-sh drop-in replacement. python3 alone cannot
-          # supply os.path.relpath semantics on every invocation pattern,
-          # keeping it in shell avoids a Python dependency at each call.
-          cat > "$TMPDIR/bin/relpath" << 'EOF'
-#!/bin/sh
-# relpath target base -- print target path relative to base
-python3 - "$1" "${2:-.}" << 'PYEOF'
-import os, sys
-print(os.path.relpath(sys.argv[1], sys.argv[2]))
-PYEOF
-EOF
+          # provide a POSIX-sh drop-in replacement using python3 (which
+          # is in nativeBuildInputs) for exact os.path.relpath semantics.
+          # NOTE: this script is generated with echo instead of a heredoc
+          # because the Nix indented-string syntax rejects dollar-brace
+          # sequences here (they would be parsed as interpolations).
+          {
+            echo '#!/bin/sh'
+            echo '# relpath target base -- print target path relative to base'
+            echo 'exec ${pkgs.python3}/bin/python3 -c "'
+            echo 'import os, sys'
+            echo "print(os.path.relpath(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else '.'))"
+            echo '" "$@"'
+          } > "$TMPDIR/bin/relpath"
           chmod +x "$TMPDIR/bin/relpath"
 
           # NOTE: do NOT prepend /usr/sbin:/usr/bin:/bin:/sbin to PATH
