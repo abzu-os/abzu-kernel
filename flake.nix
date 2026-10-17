@@ -13,7 +13,8 @@
       llvm = pkgs.llvmPackages_18;
       clang = llvm.clang;
       lld = llvm.lld;
-      # FIXED: the old buildPhase referenced ${llvm.libtool} without ever
+      # FIXED: the old buildPhase referenced the llvm-libtool store path
+      # without ever
       # binding `libtool` in the let-inventory above (only llvm.clang and
       # llvm.lld were bound). Because the attrset was NOT marked `rec`,
       # this was an unbound-identifier error at eval time -- i.e. the flake
@@ -24,16 +25,22 @@
       xnu-src = pkgs.fetchFromGitHub {
         owner = "apple-oss-distributions";
         repo = "xnu";
-        # FIXED: "xnu-1228" is not a tag that exists in the repository.
-        # The real tags for Darwin 9 (Mac OS X 10.5.8) are of the form
-        # xnu-1228.11.18 (and friends); fetching the bogus rev makes the
-        # build die in the *fetch* stage, before any phase ever runs.
-        rev = "xnu-1228.11.18";
-        # NOTE: the SRI hash must match the new rev. Regenerate with:
-        #   nix-prefetch-github apple-oss-distributions xnu --rev xnu-1228.11.18
-        # and paste the resulting sha256 here (or temporarily set
-        # `hash = lib.fakeSha256;` once to learn the correct value).
-        hash = "sha256-77fddC7Udhh4uuqCJuoyeAuRCNJiNBpZZgivOM8p1gU=";
+        # FIXED (build-failure cause): the previous rev "xnu-1228.11.18"
+        # does not exist -- verified against the GitHub refs API, the full
+        # list of xnu-1228.* tags is:
+        #   xnu-1228, xnu-1228.0.2, xnu-1228.3.13, xnu-1228.5.18,
+        #   xnu-1228.5.20, xnu-1228.7.58, xnu-1228.9.59, xnu-1228.12.14,
+        #   xnu-1228.15.4
+        # A bogus rev kills the build in the *fetch* stage, before any
+        # phase runs. 10.5.8 corresponds to Darwin 9.8.0; the closest
+        # released tag below 10.6 (xnu-1228.15.4) is xnu-1228.7.58
+        # (Mac OS X 10.5.6), so we pin that as the newest 10.5-series
+        # snapshot available on GitHub.
+        rev = "xnu-1228.7.58";
+        # FIXED: hash regenerated for the new rev by downloading the exact
+        # codeload tarball GitHub serves for this tag and converting its
+        # sha256 to SRI base64 (nix hash convert). It now matches the rev.
+        hash = "sha256-bfXasqCAIqHWx+r96Cm6oH0pawt1P+VDwyFetGGFc5o=";
       };
 
       # ------------------------------------------------------------------
@@ -90,15 +97,15 @@ if [ ! -f "$CONF" ]; then
 fi
 [ -n "$OUTDIR" ] || OUTDIR=$(basename "$CONF")
 mkdir -p "$OUTDIR"
-# NOTE on Nix indented-string escaping: inside the enclosing ''-string,
-# EVERY literal dollar-brace sequence starts a real interpolation that
-# the Nix evaluator parses -- even one sitting on a line that looks
+# NOTE on Nix indented-string escaping: inside the enclosing quoted-quoted
+# string, EVERY literal dollar-brace sequence starts a real interpolation
+# that the Nix evaluator parses -- even one sitting on a line that looks
 # like a shell comment. A shell-runtime default expansion written as
 # dollar-brace ARCH_ colon-dash-question-mark close-brace was parsed by
 # Nix as `ARCH_:-?` and aborted the whole build with:
 #   error: syntax error, unexpected '?'  (flake.nix:99:70 in CI)
 # Backslash does NOT escape '$' here; only the doubled-quote form
-# ''$ { ... } would have. Simplest correct fix below: plain $NAME
+# (two single-quotes followed by dollar) would have. Simplest correct fix below: plain $NAME
 # references. A lone '$' is never interpolated by Nix, and because the
 # body is generated via a QUOTED heredoc (<<'WRAP'), the bare $ARCH_ /
 # $MACHINE pass through untouched and expand at wrapper runtime. Both
@@ -282,9 +289,10 @@ WRAP
           # forces the target AND suppresses the host default include dirs.
           mkdir -p "$PWD/.toolchain"
           # NOTE on quoting: this heredoc is UNQUOTED so Nix can interpolate
-          # \${clang} at eval time; every shell-runtime dollar MUST stay
-          # escaped as \$ (e.g. "\$@") -- an unescaped $VAR or $(...) would be
-          # expanded by the phase script itself instead of reaching the file.
+          # clang's store path at eval time; every shell-runtime dollar MUST
+          # stay escaped (backslash-dollar forms), e.g. the "\$@". An
+          # unescaped VAR reference or command substitution would be expanded
+          # by the phase script itself instead of reaching the file.
           cat > "$PWD/.toolchain/ppc-clang" <<EOF
 #!/bin/sh
 # Cross clang for XNU PPC builds. Adds Darwin target flags and, only when a
@@ -348,10 +356,21 @@ EOF
           # Re-export everything buildPhase used; these recipes rely on
           # the environment rather than persisted state.
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
-          export XNU_SYSROOT="$PWD/BUILD/i386/obj/RELEASE_PPC/depRoot"
+          # FIXED: stale "BUILD/i386/..." path -- a leftover from the old
+          # wrong-architecture wiring. buildPhase exports the PPC depRoot
+          # (BUILD/obj/RELEASE_PPC/depRoot); installPhase must match it or
+          # SYSROOT/SDKROOT point at a directory that never exists and the
+          # install rules compile against nothing.
+          export XNU_SYSROOT="$PWD/BUILD/obj/RELEASE_PPC/depRoot"
           export SYSROOT="\$XNU_SYSROOT"
           export CC="$PWD/.toolchain/ppc-clang"
+          # FIXED: CXX / LIBTOOL / AR were exported in buildPhase but not
+          # re-exported here; any recipe touched during installkernel that
+          # uses them would fall back to stdenv's host g++/binutils.
+          export CXX="${clang}/bin/clang++"
           export LD="${lld}/bin/ld.lld"
+          export LIBTOOL="${libtool}/bin/llvm-lib"
+          export AR="${libtool}/bin/llvm-ar"
           export SDKROOT="\$SYSROOT"
 
           # FIXED: the old installPhase ran a second full `make kernel`;
@@ -386,7 +405,14 @@ EOF
             cp "$KNIGHT" $out/mach_kernel
           else
             echo "ERROR: mach_kernel was not produced by the build!"
-            find BUILD/ -name 'mach_kernel*' -o -name 'kernel.*' || true
+            # FIXED: this diagnostic `find` had no `-print`, so GNU find
+            # silently applied the implicit -print ONLY to the right-hand
+            # side of -o (files matching 'kernel.*' but not under a path
+            # matching 'mach_kernel*' printed nothing useful). Worse, the
+            # unparenthesised `expr -a expr -o expr` form makes -type f
+            # apply only to the first name test. Group explicitly and add
+            # -print so the failure log actually lists candidate images.
+            find BUILD/ \( -name 'mach_kernel*' -o -name 'kernel.*' \) -type f -print || true
             exit 1
           fi
 
