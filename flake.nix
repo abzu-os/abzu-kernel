@@ -236,7 +236,17 @@ WRAP
           #    sources -- broken twice over: patchPhase runs BEFORE buildPhase
           #    creates those files, and Nix hands each phase a fresh TMPDIR,
           #    so the baked paths pointed at nothing.
+          #    FIXED (CI run 2026-10-17): XNU's makedefs/MakeInc.def computes
+          #    the parallel-make job count as
+          #        MAKEJOBS = --jobs=$(shell expr `/usr/sbin//sysctl -n hw.logicalcpu` \* 2)
+          #    -- with a DOUBLE slash between "sbin" and "sysctl". The old
+          #    single-slash sed rule never matched that literal, so every
+          #    recursive make ran "/usr/sbin//sysctl" (missing on Linux),
+          #    expr got an empty first operand ("syntax error: unexpected
+          #    argument '2'"), MAKEJOBS became "--jobs=" and `make kernel`
+          #    died with "No rule to make target 'kernel'". Match both forms.
           find . -type f -exec sed -i \
+            -e "s|/usr/sbin//sysctl|sysctl|g" \
             -e "s|/usr/sbin/sysctl|sysctl|g" \
             -e "s|/usr/bin/config|config|g" \
             -e "s|/usr/sbin/config|config|g" \
