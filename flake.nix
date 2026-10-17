@@ -27,7 +27,7 @@
         version = "1228";
         src = xnu-src;
 
-        # Added perl and tcsh (which provides csh) to nativeBuildInputs
+        # Added tcsh to provide 'csh' in the PATH
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
 
@@ -35,8 +35,6 @@
           runHook prePatch
           echo "=== DEBUG: Exhaustively patching hardcoded paths using GNU sed ==="
           
-          # Note: We use Nix string interpolation ${pkgs.tcsh} to inject the absolute store path,
-          # ensuring shebangs like #!/bin/csh become valid absolute paths like #!/nix/store/.../bin/csh
           find . -type f -exec sed -i \
             -e 's|/usr/sbin/sysctl|sysctl|g' \
             -e 's|/usr/sbin//sysctl|sysctl|g' \
@@ -48,10 +46,14 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
-            -e 's|/bin/csh|${pkgs.tcsh}/bin/csh|g' \
+            -e 's|#!/bin/csh|#!/usr/bin/env tcsh|g' \
+            -e 's|/bin/csh|tcsh|g' \
             -e 's|/usr/bin/perl|${pkgs.perl}/bin/perl|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
+            -e 's|-arch ppc||g' \
+            -e 's|-mmultiple||g' \
+            -e 's|-mno-multiple||g' \
             {} +
           
           echo "=== DEBUG: Verifying patches ==="
@@ -64,6 +66,8 @@
           grep -rn "/usr/bin/perl" . && echo "ERROR: perl still hardcoded!" || echo "SUCCESS: perl patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
+          grep -rn "\-arch ppc" . && echo "ERROR: -arch ppc still present!" || echo "SUCCESS: -arch ppc removed"
+          grep -rn "\-mmultiple" . && echo "ERROR: -mmultiple still present!" || echo "SUCCESS: -mmultiple removed"
           
           runHook postPatch
         '';
@@ -128,7 +132,7 @@ EOF
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
           command -v mkdir || echo "WARNING: mkdir not found in PATH!"
           command -v cp || echo "WARNING: cp not found in PATH!"
-          command -v csh || echo "WARNING: csh not found in PATH!"
+          command -v tcsh || echo "WARNING: tcsh not found in PATH!"
           command -v perl || echo "WARNING: perl not found in PATH!"
           command -v tr || echo "WARNING: tr not found in PATH!"
 
