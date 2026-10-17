@@ -377,8 +377,13 @@ EOF
           # if buildPhase had already produced the object files this was
           # just wasted work, and if it hadn't (because failures were
           # ignored) it re-failed obscurely. Now buildPhase fails fast, so
-          # here we only finish/install the kernel image.
-          make INSTALLDIR="\$PWD/BUILD/obj" installkernel || true
+          # here we only finish/install the kernel image. NOTE: XNU 1228's
+          # top-level Makefile has no `installkernel` target -- invoking it
+          # aborted with "No rule to make target 'installkernel'" *before*
+          # reaching the following mach_kernel detection, turning an
+          # already-successful build into a spurious failure. The PPC
+          # install rules run as part of `make kernel` itself, so nothing
+          # extra is required here; keep the copy-only step below.
 
           echo "=== DEBUG: Listing main build output directory ==="
           ls -lh BUILD/obj/RELEASE_PPC/ || true
