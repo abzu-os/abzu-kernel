@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-12  # <--- CHANGE THIS LINE
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,20 +18,20 @@ jobs:
       - name: Build Kernel
         run: nix build .#abzu-xnu-10-5-8
 
-      - name: Prepare Artifact (Detective Mode)
+      - name: Prepare Artifact
         run: |
           mkdir -p artifacts
+          echo "=== DEBUG: Listing main build output directory ==="
+          ls -lh BUILD/obj/RELEASE_PPC/ || true
           
-          echo "=== DEBUG: Listing everything in the 'result' directory ==="
-          ls -lR result/
+          echo "=== DEBUG: Finding any file larger than 1MB ==="
+          find BUILD/ -type f -size +1M || true
           
-          echo "=== DEBUG: Searching for any file with 'kernel' or 'mach' in the name ==="
-          find result/ -type f \( -name "*kernel*" -o -name "*mach*" \)
+          cp BUILD/obj/RELEASE_PPC/mach_kernel artifacts/ 2>/dev/null || echo "mach_kernel not found at root"
+          cp BUILD/obj/RELEASE_PPC/kernel artifacts/ 2>/dev/null || echo "kernel not found at root"
+          find BUILD/ -type f -size +1M -exec cp {} artifacts/ \; || true
           
-          # Copy any matching files into the artifacts folder
-          find result/ -type f \( -name "*kernel*" -o -name "*mach*" \) -exec cp {} artifacts/ \; || true
-          
-          echo "=== DEBUG: Final contents of artifacts folder ==="
+          echo "=== DEBUG: Final contents of artifacts ==="
           ls -lh artifacts/
 
       - name: Upload Kernel Artifact
