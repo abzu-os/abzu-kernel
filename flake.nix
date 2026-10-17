@@ -8,16 +8,15 @@
   outputs = { self, nixpkgs }:
     let
       system = "aarch64-darwin";
-      crossSystem = { config = "powerpc-apple-darwin"; };
+      
+      # CRITICAL FIX: Use the exact Nixpkgs system string for 32-bit PowerPC macOS
+      crossSystem = { config = "powerpc-darwin"; };
 
       pkgs = import nixpkgs {
         inherit system crossSystem;
-        # CRITICAL: Tell Nix to allow building for powerpc-darwin even if 
-        # it's not on the official "fully tested" list for every package.
         config.allowUnsupportedSystem = true;
       };
       
-      # pkgs.clang is the cross-compiler (runs on aarch64-darwin, targets powerpc-darwin)
       clang = pkgs.clang;
       lld = pkgs.lld;
 
@@ -32,7 +31,6 @@
         version = "1228";
         src = xnu-src;
 
-        # gnumake runs on the build machine, clang/lld are the cross-tools
         nativeBuildInputs = [ pkgs.buildPackages.gnumake clang lld ];
 
         buildPhase = ''
