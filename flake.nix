@@ -28,12 +28,11 @@
         nativeBuildInputs = [ pkgs.gnumake clang lld ];
         hardeningDisable = [ "all" ];
 
-        # 1. Patch hardcoded absolute paths in XNU's build system
         patchPhase = ''
           runHook prePatch
           
           echo "Patching hardcoded paths in XNU Makefiles..."
-          # Using "" instead of '' to avoid Nix string termination
+          # BSD sed on macOS requires an empty string "" for the -i flag
           find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/local/bin/relpath|relpath|g' {} +
           find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/bin/config|config|g' {} +
           
@@ -43,7 +42,6 @@
         buildPhase = ''
           runHook preBuild
           
-          # 2. Provide a robust `relpath` replacement using Perl (guaranteed on macOS)
           mkdir -p $TMPDIR/bin
           cat > $TMPDIR/bin/relpath << 'EOF'
 #!/usr/bin/env perl
@@ -54,10 +52,8 @@ print File::Spec->abs2rel($path, $base), "\n";
 EOF
           chmod +x $TMPDIR/bin/relpath
           
-          # 3. Ensure system tools (like /usr/bin/config) and our relpath are in PATH
           export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$TMPDIR/bin:$PATH"
           
-          # 4. Manually force the raw Clang to target 32-bit PowerPC macOS
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
                CC="${clang}/bin/clang -target powerpc-apple-darwin -m32" \
                LD="${lld}/bin/ld.lld" \
@@ -73,13 +69,11 @@ EOF
           echo "=== DEBUG installPhase: Finding kernel files ==="
           find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \)
           
-          # Copy any matching files into the output directory
           find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \) -exec cp {} $out/ \; || true
           
           echo "=== DEBUG installPhase: Final contents of \$out ==="
           ls -lh $out/
           
-          # Intentionally fail if empty, so Nix prints the debug logs above!
           if [ -z "$(ls -A $out)" ]; then
             echo "ERROR: No kernel files found in BUILD directory!"
             exit 1
