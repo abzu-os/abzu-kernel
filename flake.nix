@@ -11,10 +11,14 @@
       pkgs = import nixpkgs { inherit system; };
       
       llvm = pkgs.llvmPackages_18;
+      
+      # CRITICAL FIX: Use the unwrapped clang to prevent Nix's cc-wrapper 
+      # from injecting conflicting host architecture flags.
+      clang = llvm.clang-unwrapped;
+      lld = llvm.lld;
 
       xnu-src = pkgs.fetchurl {
         url = "https://opensource.apple.com/tarballs/xnu/xnu-1228.tar.gz";
-        # THE REAL HASH!
         sha256 = "sha256-QsUS0OUrg0LE7PMf7CnGF5HXQQ6tCELh8JMXrid6yT8=";
       };
     in
@@ -24,16 +28,16 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake llvm.clang llvm.lld ];
+        nativeBuildInputs = [ pkgs.gnumake clang lld ];
         hardeningDisable = [ "all" ];
 
         buildPhase = ''
           runHook preBuild
           
-          # Manually force Clang to target 32-bit PowerPC macOS
+          # Manually force the raw Clang to target 32-bit PowerPC macOS
           make ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE \
-               CC="${llvm.clang}/bin/clang -target powerpc-apple-darwin -m32" \
-               LD="${llvm.lld}/bin/ld.lld" \
+               CC="${clang}/bin/clang -target powerpc-apple-darwin -m32" \
+               LD="${lld}/bin/ld.lld" \
                SDKROOT=/
           
           runHook postBuild
