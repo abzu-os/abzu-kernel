@@ -27,22 +27,29 @@
         version = "1228";
         src = xnu-src;
 
-        # Added procps to provide the 'sysctl' command on Linux
+        # Added procps (for sysctl) and coreutils (for mkdir, pwd)
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.procps clang lld ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
-          echo "=== DEBUG: Aggressively patching hardcoded paths using GNU sed ==="
+          echo "=== DEBUG: Surgically patching hardcoded paths using GNU sed ==="
           
-          # Strip /usr/sbin/ and /usr/bin/ prefixes entirely, then clean up any resulting double slashes
-          find . -type f -exec sed -i -e 's|/usr/sbin/||g' -e 's|/usr/bin/||g' -e 's|//|/|g' {} +
-          find . -type f -exec sed -i 's|/bin/pwd|pwd|g' {} +
-          find . -type f -exec sed -i 's|/usr/local/bin/relpath|relpath|g' {} +
+          # Replace specific absolute paths with their command equivalents
+          find . -type f -exec sed -i \
+            -e 's|/usr/sbin/sysctl|sysctl|g' \
+            -e 's|/usr/bin/config|config|g' \
+            -e 's|/usr/sbin/config|config|g' \
+            -e 's|/bin/pwd|pwd|g' \
+            -e 's|/bin/mkdir|mkdir|g' \
+            -e 's|/usr/local/bin/relpath|relpath|g' \
+            {} +
           
           echo "=== DEBUG: Verifying patches ==="
-          grep -rn "/usr/sbin/" . && echo "WARNING: Some /usr/sbin/ paths might remain!" || echo "SUCCESS: /usr/sbin/ paths cleared"
-          grep -rn "/bin/pwd" . && echo "ERROR: /bin/pwd still hardcoded!" || echo "SUCCESS: /bin/pwd patched"
+          grep -rn "/usr/sbin/sysctl" . && echo "ERROR: sysctl still hardcoded!" || echo "SUCCESS: sysctl patched"
+          grep -rn "/usr/bin/config" . && echo "ERROR: config still hardcoded!" || echo "SUCCESS: config patched"
+          grep -rn "/bin/pwd" . && echo "ERROR: pwd still hardcoded!" || echo "SUCCESS: pwd patched"
+          grep -rn "/bin/mkdir" . && echo "ERROR: mkdir still hardcoded!" || echo "SUCCESS: mkdir patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           
           runHook postPatch
@@ -70,6 +77,7 @@
           command -v relpath || echo "WARNING: relpath not found in PATH!"
           command -v pwd || echo "WARNING: pwd not found in PATH!"
           command -v sysctl || echo "WARNING: sysctl not found in PATH!"
+          command -v mkdir || echo "WARNING: mkdir not found in PATH!"
 
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
           export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
