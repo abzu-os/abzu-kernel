@@ -33,8 +33,9 @@
           runHook prePatch
           
           echo "Patching hardcoded paths in XNU Makefiles..."
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i '' 's|/usr/local/bin/relpath|relpath|g' {} +
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i '' 's|/usr/bin/config|config|g' {} +
+          # Using "" instead of '' to avoid Nix string termination
+          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/local/bin/relpath|relpath|g' {} +
+          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/bin/config|config|g' {} +
           
           runHook postPatch
         '';
@@ -42,16 +43,15 @@
         buildPhase = ''
           runHook preBuild
           
-          # 2. Provide a simple, compatible `relpath` replacement
+          # 2. Provide a robust `relpath` replacement using Perl (guaranteed on macOS)
           mkdir -p $TMPDIR/bin
           cat > $TMPDIR/bin/relpath << 'EOF'
-          #!/usr/bin/env python3
-          import os, sys
-          if len(sys.argv) >= 3:
-              print(os.path.relpath(sys.argv[1], sys.argv[2]))
-          else:
-              print(os.path.relpath(sys.argv[1]))
-          EOF
+#!/usr/bin/env perl
+use File::Spec;
+my $path = shift;
+my $base = shift || ".";
+print File::Spec->abs2rel($path, $base), "\n";
+EOF
           chmod +x $TMPDIR/bin/relpath
           
           # 3. Ensure system tools (like /usr/bin/config) and our relpath are in PATH
