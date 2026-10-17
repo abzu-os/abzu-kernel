@@ -27,7 +27,6 @@
         version = "1228";
         src = xnu-src;
 
-        # Removed procps since we are mocking sysctl
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils clang lld ];
         hardeningDisable = [ "all" ];
 
@@ -73,20 +72,32 @@
           } > "$TMPDIR/bin/relpath"
           chmod +x "$TMPDIR/bin/relpath"
 
-          # Mock sysctl to return plausible macOS values for the build system
+          # Mock sysctl to handle the -n flag and return plausible macOS values
           {
             echo '#!/bin/sh'
-            echo 'case "$1" in'
-            echo '  hw.logicalcpu) echo "hw.logicalcpu: 4" ;;'
-            echo '  hw.physicalcpu) echo "hw.physicalcpu: 4" ;;'
-            echo '  hw.memsize) echo "hw.memsize: 4294967296" ;;'
-            echo '  hw.ncpu) echo "hw.ncpu: 4" ;;'
-            echo '  hw.activecpu) echo "hw.activecpu: 4" ;;'
-            echo '  hw.cpufrequency) echo "hw.cpufrequency: 2000000000" ;;'
-            echo '  hw.cachelinesize) echo "hw.cachelinesize: 64" ;;'
-            echo '  hw.pagesize) echo "hw.pagesize: 4096" ;;'
-            echo '  *) echo "sysctl: unknown oid ''$1" >&2; exit 1 ;;'
+            echo 'PRINT_VALUE_ONLY=0'
+            echo 'if [ "$1" = "-n" ]; then'
+            echo '  PRINT_VALUE_ONLY=1'
+            echo '  shift'
+            echo 'fi'
+            echo 'OID=$1'
+            echo 'VALUE=""'
+            echo 'case "$OID" in'
+            echo '  hw.logicalcpu) VALUE="4" ;;'
+            echo '  hw.physicalcpu) VALUE="4" ;;'
+            echo '  hw.memsize) VALUE="4294967296" ;;'
+            echo '  hw.ncpu) VALUE="4" ;;'
+            echo '  hw.activecpu) VALUE="4" ;;'
+            echo '  hw.cpufrequency) VALUE="2000000000" ;;'
+            echo '  hw.cachelinesize) VALUE="64" ;;'
+            echo '  hw.pagesize) VALUE="4096" ;;'
+            echo '  *) echo "sysctl: unknown oid '\''$OID'\''" >&2; exit 1 ;;'
             echo 'esac'
+            echo 'if [ "$PRINT_VALUE_ONLY" -eq 1 ]; then'
+            echo '  echo "$VALUE"'
+            echo 'else'
+            echo '  echo "$OID: $VALUE"'
+            echo 'fi'
           } > "$TMPDIR/bin/sysctl"
           chmod +x "$TMPDIR/bin/sysctl"
 
