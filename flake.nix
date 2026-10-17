@@ -25,29 +25,14 @@
         version = "1228";
         src = xnu-src;
 
-        # Explicitly add perl, grep, and findutils to guarantee they are in PATH
         nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.perl pkgs.gnugrep pkgs.findutils ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
-          
-          echo "=== DEBUG: Checking tools ==="
-          which perl || echo "ERROR: perl not found!"
-          perl --version | head -n 2
-          
-          echo "=== DEBUG: Before patching ==="
-          grep -rn "/usr/local/bin/relpath" . || echo "relpath NOT found before (good?)"
-          grep -rn "/usr/bin/config" . || echo "config NOT found before (good?)"
-          
           echo "Patching hardcoded paths in ALL files..."
           find . -type f -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} \;
           find . -type f -exec perl -pi -e 's|/usr/bin/config|config|g' {} \;
-          
-          echo "=== DEBUG: After patching ==="
-          grep -rn "/usr/local/bin/relpath" . || echo "SUCCESS: relpath was patched!"
-          grep -rn "/usr/bin/config" . || echo "SUCCESS: config was patched!"
-          
           runHook postPatch
         '';
 
@@ -78,16 +63,24 @@ EOF
           runHook preInstall
           mkdir -p $out
           
-          echo "=== DEBUG installPhase: Finding kernel files ==="
-          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \)
+          echo "=== DEBUG: Listing main build output directory ==="
+          ls -lh BUILD/obj/RELEASE_PPC/ || true
           
-          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \) -exec cp {} $out/ \; || true
+          echo "=== DEBUG: Finding any file larger than 1MB (the kernel binary) ==="
+          find BUILD/ -type f -size +1M || true
           
-          echo "=== DEBUG installPhase: Final contents of \$out ==="
+          echo "=== DEBUG: Attempting to copy known kernel names ==="
+          cp BUILD/obj/RELEASE_PPC/mach_kernel $out/ 2>/dev/null || echo "mach_kernel not found at root"
+          cp BUILD/obj/RELEASE_PPC/kernel $out/ 2>/dev/null || echo "kernel not found at root"
+          
+          # Fallback: copy ANY file larger than 1MB
+          find BUILD/ -type f -size +1M -exec cp {} $out/ \; || true
+          
+          echo "=== DEBUG: Final contents of \$out ==="
           ls -lh $out/
           
           if [ -z "$(ls -A $out)" ]; then
-            echo "ERROR: No kernel files found in BUILD directory!"
+            echo "ERROR: No files were copied to the output directory!"
             exit 1
           fi
           
