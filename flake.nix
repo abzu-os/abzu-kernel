@@ -27,7 +27,6 @@
         version = "1228";
         src = xnu-src;
 
-        # Added tcsh to provide 'csh' in the PATH
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
 
@@ -46,11 +45,13 @@
             -e 's|/bin/mkdir|mkdir|g' \
             -e 's|/bin//mkdir|mkdir|g' \
             -e 's|/bin/cp|cp|g' \
-            -e 's|#!/bin/csh|#!/usr/bin/env tcsh|g' \
+            -e 's|#!/bin/csh|#!${pkgs.tcsh}/bin/tcsh|g' \
             -e 's|/bin/csh|tcsh|g' \
             -e 's|/usr/bin/perl|${pkgs.perl}/bin/perl|g' \
             -e 's|/usr/local/bin/relpath|relpath|g' \
             -e 's|/usr/bin/tr|tr|g' \
+            -e 's|-mno-altivec||g' \
+            -e 's|-mcpu=[^ ]*||g' \
             -e 's|-arch ppc||g' \
             -e 's|-mmultiple||g' \
             -e 's|-mno-multiple||g' \
@@ -66,8 +67,8 @@
           grep -rn "/usr/bin/perl" . && echo "ERROR: perl still hardcoded!" || echo "SUCCESS: perl patched"
           grep -rn "/usr/local/bin/relpath" . && echo "ERROR: relpath still hardcoded!" || echo "SUCCESS: relpath patched"
           grep -rn "/usr/bin/tr" . && echo "ERROR: tr still hardcoded!" || echo "SUCCESS: tr patched"
-          grep -rn "\-arch ppc" . && echo "ERROR: -arch ppc still present!" || echo "SUCCESS: -arch ppc removed"
-          grep -rn "\-mmultiple" . && echo "ERROR: -mmultiple still present!" || echo "SUCCESS: -mmultiple removed"
+          grep -rn "\-mno-altivec" . && echo "ERROR: -mno-altivec still present!" || echo "SUCCESS: -mno-altivec removed"
+          grep -rn "\-mcpu=" . && echo "ERROR: -mcpu= still present!" || echo "SUCCESS: -mcpu= removed"
           
           runHook postPatch
         '';
