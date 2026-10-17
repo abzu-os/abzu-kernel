@@ -25,16 +25,28 @@
         version = "1228";
         src = xnu-src;
 
-        # Added pkgs.perl here so Nix knows to put it in the PATH
-        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.perl ];
+        # Explicitly add perl, grep, and findutils to guarantee they are in PATH
+        nativeBuildInputs = [ pkgs.gnumake clang lld pkgs.perl pkgs.gnugrep pkgs.findutils ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
           runHook prePatch
           
-          echo "Patching hardcoded paths in XNU Makefiles..."
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} +
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/bin/config|config|g' {} +
+          echo "=== DEBUG: Checking tools ==="
+          which perl || echo "ERROR: perl not found!"
+          perl --version | head -n 2
+          
+          echo "=== DEBUG: Before patching ==="
+          grep -rn "/usr/local/bin/relpath" . || echo "relpath NOT found before (good?)"
+          grep -rn "/usr/bin/config" . || echo "config NOT found before (good?)"
+          
+          echo "Patching hardcoded paths in ALL files..."
+          find . -type f -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} \;
+          find . -type f -exec perl -pi -e 's|/usr/bin/config|config|g' {} \;
+          
+          echo "=== DEBUG: After patching ==="
+          grep -rn "/usr/local/bin/relpath" . || echo "SUCCESS: relpath was patched!"
+          grep -rn "/usr/bin/config" . || echo "SUCCESS: config was patched!"
           
           runHook postPatch
         '';
