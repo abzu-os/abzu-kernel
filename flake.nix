@@ -32,9 +32,9 @@
           runHook prePatch
           
           echo "Patching hardcoded paths in XNU Makefiles..."
-          # BSD sed on macOS requires an empty string "" for the -i flag
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/local/bin/relpath|relpath|g' {} +
-          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec sed -i "" 's|/usr/bin/config|config|g' {} +
+          # perl -pi -e is the universal, cross-platform way to do in-place sed replacements
+          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/local/bin/relpath|relpath|g' {} +
+          find . -type f \( -name "MakeInc.rule" -o -name "Makefile" \) -exec perl -pi -e 's|/usr/bin/config|config|g' {} +
           
           runHook postPatch
         '';
