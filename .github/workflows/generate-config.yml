@@ -6,19 +6,14 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Use the latest stable official FreeBSD runtime container image
-    container: freebsd/freebsd-runtime:15.1
     steps:
-      - name: Install minimal dependencies
-        run: pkg install -y bash curl gtar git python3
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Download and Extract XNU 1228 Source
         run: |
           curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
-          gtar -xzf xnu.tar.gz
+          tar -xzf xnu.tar.gz
 
       - name: Create work directory and scripts via Python
         run: |
@@ -130,7 +125,63 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Run authentic FreeBSD config tool
+      - name: Compile authentic NetBSD config tool (Fully Hardened)
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex libbsd-dev zlib1g-dev
+          
+          mkdir -p netbsd-config/sys
+          cd netbsd-config
+          
+          # Helper function to download files and FAIL if 404 (prevents "404 Not Found" text in .h files)
+          fetch() {
+            curl -sSfL -o "$2" "$1"
+          }
+          
+          # Download NetBSD config tool source
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.c main.c
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkheaders.c mkheaders.c
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkmakefile.c mkmakefile.c
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkioconf.c mkioconf.c
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/gram.y gram.y
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/scan.l scan.l
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/defs.h defs.h
+          
+          # Download missing dependency headers (FIXED util.h URL)
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/include/vis.h vis.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/include/util.h util.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/gen/crc_extern.h crc_extern.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/sys/sys/sem.h sem.h
+          
+          # Create dummy sys/sysctl.h (Ubuntu 24.04 removed this from glibc)
+          echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
+          
+          # Safely prepend to defs.h to fix missing types (avoids sed -i '1i' quirks)
+          printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
+          
+          # Verify no file is a 404 HTML page
+          if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
+            echo "ERROR: A downloaded file contains a 404 error!"
+            exit 1
+          fi
+          
+          bison -d -o gram.c gram.y
+          flex -o scan.c scan.l
+          
+          # Compile with stubs for NetBSD-specific macros and safe include paths
+          gcc -I. -I./sys \
+              -D'__RCSID(x)=' \
+              -D'COPYRIGHT(x)=' \
+              -D'__COPYRIGHT(x)=' \
+              -D'__unused=' \
+              -D'__printflike(x,y)=' \
+              -I/usr/include/bsd \
+              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl -lbsd -lz
+          
+          sudo mv config /usr/local/bin/config
+
+      - name: Run authentic NetBSD config tool
         run: |
           set -eu
           cd xnu-xnu-1228/bsd
@@ -141,8 +192,8 @@ jobs:
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          # Run the pre-compiled, authentic FreeBSD /usr/sbin/config tool
-          /usr/sbin/config -c ./conf "$CONF_FILE"
+          # Run the locally compiled authentic NetBSD config tool
+          /usr/local/bin/config -c ./conf "$CONF_FILE"
           
           echo "=== Generated Files ==="
           ls -lh ../BUILD/obj/RELEASE_PPC/
