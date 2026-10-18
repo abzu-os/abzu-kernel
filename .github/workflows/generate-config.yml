@@ -125,7 +125,7 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Compile authentic NetBSD config tool (Fully Hardened)
+      - name: Compile authentic NetBSD config tool (Fully Verified URLs)
         run: |
           set -eu
           sudo apt-get update
@@ -134,12 +134,12 @@ jobs:
           mkdir -p netbsd-config/sys
           cd netbsd-config
           
-          # Helper function to download files and FAIL if 404 (prevents "404 Not Found" text in .h files)
+          # Helper function to download files and FAIL immediately if 404
           fetch() {
             curl -sSfL -o "$2" "$1"
           }
           
-          # Download NetBSD config tool source
+          # Download NetBSD config tool source (VERIFIED PATHS)
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.c main.c
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkheaders.c mkheaders.c
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkmakefile.c mkmakefile.c
@@ -147,20 +147,21 @@ jobs:
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/gram.y gram.y
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/scan.l scan.l
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/defs.h defs.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/util.h util.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.h main.h
           
-          # Download missing dependency headers (FIXED util.h URL)
+          # Download missing dependency headers (VERIFIED PATHS)
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/include/vis.h vis.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/include/util.h util.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/gen/crc_extern.h crc_extern.h
+          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/include/crc_extern.h crc_extern.h
           fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/sys/sys/sem.h sem.h
           
           # Create dummy sys/sysctl.h (Ubuntu 24.04 removed this from glibc)
           echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
           
-          # Safely prepend to defs.h to fix missing types (avoids sed -i '1i' quirks)
+          # Safely prepend to defs.h to fix missing types
           printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
           
-          # Verify no file is a 404 HTML page
+          # Final sanity check: ensure no file is a 404 HTML page
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
             echo "ERROR: A downloaded file contains a 404 error!"
             exit 1
