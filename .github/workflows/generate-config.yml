@@ -10,9 +10,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex libfl-dev
-
       - name: Download and Extract XNU 1228 Source
         run: |
           curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
@@ -122,16 +119,7 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Compile the XNU config tool
-        run: |
-          cd xnu-xnu-1228/config
-          # Generate parser and lexer from source
-          bison -d -o gram.c gram.y
-          flex -o scan.c scan.l
-          # Compile the config tool directly, bypassing the broken XNU Makefile
-          gcc -o config *.c -lfl
-
-      - name: Run config tool to generate final Makefile and ioconf.c
+      - name: Run NetBSD config tool to generate final files
         run: |
           set -eu
           cd xnu-xnu-1228/bsd
@@ -142,8 +130,10 @@ jobs:
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          # Run the config tool to generate the final files
-          ../config/config -c ./conf "$CONF_FILE"
+          # Use a NetBSD container to run the config tool, as it has the exact authentic BSD config utility
+          docker run --rm -v $(pwd):/xnu -w /xnu netbsd/netbsd:9.0 /bin/sh -c "
+            /usr/sbin/config -c ./conf ../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
+          "
           
           echo "=== Generated Files ==="
           ls -lh ../BUILD/obj/RELEASE_PPC/
