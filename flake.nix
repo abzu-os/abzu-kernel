@@ -41,7 +41,6 @@
           find . -type f -exec perl -pi -e 's/\r//g' {} \;
           
           # 3. Apply robust replacements for paths and unsupported compiler flags
-          # NOTE: Added /usr/sbin//sysctl to catch the typo in XNU's MakeInc.def!
           find . -type f -exec perl -pi -e \
             's|/usr/local/bin/relpath|relpath|g;
              s|/usr/bin/config|config|g;
@@ -51,6 +50,7 @@
              s|/usr/sbin//sysctl|sysctl|g;
              s|/usr/bin/tr|tr|g;
              s|/bin/pwd|pwd|g;
+             s|/bin/mkdir|mkdir|g;
              s|-mno-altivec||g;
              s|-mcpu=[^ ]*||g;
              s|-arch ppc||g;
