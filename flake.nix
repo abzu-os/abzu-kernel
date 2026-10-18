@@ -41,13 +41,14 @@
           find . -type f -exec perl -pi -e 's/\r//g' {} \;
           
           # 3. Apply robust replacements for paths and unsupported compiler flags
-          # NOTE: Added /bin/pwd replacement which was missing previously!
+          # NOTE: Added /usr/sbin//sysctl to catch the typo in XNU's MakeInc.def!
           find . -type f -exec perl -pi -e \
             's|/usr/local/bin/relpath|relpath|g;
              s|/usr/bin/config|config|g;
              s|/usr/sbin/config|config|g;
              s|/usr/bin/uname|uname|g;
              s|/usr/sbin/sysctl|sysctl|g;
+             s|/usr/sbin//sysctl|sysctl|g;
              s|/usr/bin/tr|tr|g;
              s|/bin/pwd|pwd|g;
              s|-mno-altivec||g;
