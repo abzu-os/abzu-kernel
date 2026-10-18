@@ -6,21 +6,23 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # Use a clean Debian container to avoid runner environment quirks
+    container: debian:bookworm
     steps:
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex curl tar
+        run: apt-get update && apt-get install -y build-essential bison flex curl tar
 
-      - name: Download XNU 1228 Source
+      - name: Download and Extract XNU 1228 Source
         run: |
           curl -L -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
           tar -xzf xnu.tar.gz
 
-      - name: Compile the 'config' tool
+      - name: Compile ONLY the 'config' tool
         run: |
           cd xnu-xnu-1228/config
           make clean >/dev/null 2>&1 || true
-          # SRCROOT=.. tells the Makefile to look in the parent directory for makedefs
-          make SRCROOT=..
+          # Force it to only build the 'config' binary by providing safe dummy paths
+          make SRCROOT=.. OBJROOT=/tmp/obj DSTROOT=/tmp/dst config
 
       - name: Generate RELEASE_PPC configuration
         run: |
