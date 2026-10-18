@@ -110,8 +110,12 @@ EOF
           export LD="${lld}/bin/ld.lld"
           export SDKROOT=/
 
-          # The default 'make' target builds the kernel
-          make
+          # Explicitly build the kernel
+          make build || make all || make
+
+          echo "=== DEBUG: What did make actually build? ==="
+          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" -o -size +1M \) || true
+          ls -lh BUILD/obj/RELEASE_PPC/ || true
 
           runHook postBuild
         '';
@@ -120,17 +124,27 @@ EOF
           runHook preInstall
           mkdir -p $out
 
-          echo "=== DEBUG: Listing main build output directory ==="
-          ls -lh BUILD/obj/RELEASE_PPC/ || true
-
+          echo "=== DEBUG: Searching for the compiled kernel ==="
+          find BUILD/ -type f \( -name "*kernel*" -o -name "*mach*" \)
+          find BUILD/ -type f -size +1M
+          
+          # Try to copy the most likely candidate
           if [ -f BUILD/obj/RELEASE_PPC/mach_kernel ]; then
             cp BUILD/obj/RELEASE_PPC/mach_kernel $out/mach_kernel
           elif [ -f BUILD/obj/PPC_RELEASE/mach_kernel ]; then
             cp BUILD/obj/PPC_RELEASE/mach_kernel $out/mach_kernel
           else
-            echo "ERROR: mach_kernel was not produced by the build!"
-            find BUILD/ -name 'mach_kernel*' || true
-            exit 1
+            # Fallback: copy the largest file in BUILD/obj/RELEASE_PPC/ (usually the kernel)
+            LARGEST_FILE=$(find BUILD/obj/RELEASE_PPC/ -type f -exec ls -s {} \; 2>/dev/null | sort -n | tail -1 | awk '{print $2}')
+            if [ -n "$LARGEST_FILE" ]; then
+              echo "Found potential kernel at: $LARGEST_FILE"
+              cp "$LARGEST_FILE" $out/mach_kernel
+            else
+              echo "ERROR: mach_kernel was not produced by the build!"
+              find BUILD/ -name '*kernel*' || true
+              find BUILD/ -name '*mach*' || true
+              exit 1
+            fi
           fi
 
           echo "=== DEBUG: Final contents of \$out ==="
