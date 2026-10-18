@@ -6,20 +6,25 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # Use the official FreeBSD container to get the pre-compiled, authentic config tool
+    container: freebsd/freebsd:13.2-release
     steps:
+      - name: Install minimal dependencies
+        run: pkg install -y bash curl gtar git python3
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Download and Extract XNU 1228 Source
         run: |
           curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
-          tar -xzf xnu.tar.gz
+          gtar -xzf xnu.tar.gz
 
-      - name: Create work directory and scripts via Python
+      - name: Create work directory and scripts via Python (No YAML escaping issues)
         run: |
           mkdir -p work
           python3 -c '
-          sed_script = """
+          sed_script = r"""
           /^+/{
           s;[-+];#&;gp
           t loop
@@ -45,7 +50,7 @@ jobs:
           with open("work/merge.sed", "w") as f:
               f.write(sed_script.strip() + "\n")
 
-          awk_script = """
+          awk_script = r"""
           part == 0 && $1 != "" {
               m[$1]=m[$1] " " $2;
               next;
@@ -125,43 +130,19 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Compile authentic NetBSD config tool (Fixed)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bison flex libbsd-dev
-          
-          mkdir -p netbsd-config/sys
-          cd netbsd-config
-          
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.c
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkheaders.c
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkmakefile.c
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkioconf.c
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/gram.y
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/scan.l
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/defs.h
-          curl -sSL -O https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/util.h
-          
-          echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
-          
-          bison -d -o gram.c gram.y
-          flex -o scan.c scan.l
-          
-          gcc -I. -I./sys -D'__RCSID(x)=' -D'COPYRIGHT(x)=' -D'__COPYRIGHT(x)=' -I/usr/include/bsd -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl -lbsd
-          
-          sudo mv config /usr/local/bin/config
-
-      - name: Run authentic NetBSD config tool
+      - name: Run authentic FreeBSD config tool
         run: |
           set -eu
           cd xnu-xnu-1228/bsd
           CONF_FILE=../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
           
+          # Append the required paths for the config tool
           echo 'builddir	"."' >> "$CONF_FILE"
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          /usr/local/bin/config -c ./conf "$CONF_FILE"
+          # Run the pre-compiled, authentic FreeBSD /usr/sbin/config tool
+          /usr/sbin/config -c ./conf "$CONF_FILE"
           
           echo "=== Generated Files ==="
           ls -lh ../BUILD/obj/RELEASE_PPC/
