@@ -1,7 +1,7 @@
 name: Generate XNU Config Files
 
 on:
-  workflow_dispatch: # Allows you to run this manually
+  workflow_dispatch:
 
 jobs:
   generate:
@@ -14,19 +14,19 @@ jobs:
         run: |
           curl -L -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
           tar -xzf xnu.tar.gz
-          cd xnu-xnu-1228
 
       - name: Compile the 'config' tool
         run: |
           cd xnu-xnu-1228/config
           make clean >/dev/null 2>&1 || true
-          make
+          # SRCROOT=.. tells the Makefile to look in the parent directory for makedefs
+          make SRCROOT=..
 
       - name: Generate RELEASE_PPC configuration
         run: |
           cd xnu-xnu-1228
           mkdir -p BUILD/obj/RELEASE_PPC
-          ./config -c ../conf BUILD/obj/RELEASE_PPC/config.RELEASE_PPC
+          ./config/config -c ../conf BUILD/obj/RELEASE_PPC/config.RELEASE_PPC
 
       - name: Upload generated files as Artifact
         uses: actions/upload-artifact@v4
