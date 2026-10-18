@@ -27,7 +27,8 @@
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
-        sourceRoot = "xnu-xnu-1228";
+        # NOTE: sourceRoot is intentionally omitted. fetchFromGitHub handles 
+        # the extraction directory automatically (defaulting to 'source').
 
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
