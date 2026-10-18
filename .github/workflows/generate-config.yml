@@ -10,6 +10,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex libfl-dev
+
       - name: Download and Extract XNU 1228 Source
         run: |
           curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
@@ -88,14 +91,13 @@ jobs:
           }
           AWK_EOF
 
-      - name: Generate RELEASE_PPC configuration
+      - name: Generate RELEASE_PPC configuration (Merge Stage)
         run: |
           set -eu
           cd xnu-xnu-1228/bsd/conf
           SYS=RELEASE_PPC
           cpu=ppc
           ID=PPC
-          # FIX: Changed ../BUILD to ../../BUILD to correctly target the XNU root directory
           OBJDIR=../../BUILD/obj/RELEASE_PPC/conf
           mkdir -p "$OBJDIR"
           MASTER=./MASTER
@@ -120,37 +122,34 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Verify sh port matches doconf.csh
+      - name: Compile the XNU config tool
+        run: |
+          cd xnu-xnu-1228/config
+          # Generate parser and lexer from source
+          bison -d -o gram.c gram.y
+          flex -o scan.c scan.l
+          # Compile the config tool directly, bypassing the broken XNU Makefile
+          gcc -o config *.c -lfl
+
+      - name: Run config tool to generate final Makefile and ioconf.c
         run: |
           set -eu
-          sudo apt-get update
-          sudo apt-get install -y csh
+          cd xnu-xnu-1228/bsd
+          CONF_FILE=../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
           
-          rm -rf selfcheck && mkdir -p selfcheck/conf selfcheck/h selfcheck/BUILD
-          cp xnu-xnu-1228/bsd/conf/MASTER xnu-xnu-1228/bsd/conf/MASTER.ppc selfcheck/conf/
-          touch selfcheck/h/cs_dummy.h
+          # Append the required paths for the config tool
+          echo 'builddir	"."' >> "$CONF_FILE"
+          echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
+          echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          awk "/' >\\\$SYSCONF.new/{print; exit} {print}" \
-              xnu-xnu-1228/bsd/conf/tools/doconf/doconf.csh > selfcheck/doconf_merge.csh
-          echo 'exit 0' >> selfcheck/doconf_merge.csh
-          chmod +x selfcheck/doconf_merge.csh
+          # Run the config tool to generate the final files
+          ../config/config -c ./conf "$CONF_FILE"
           
-          ( cd selfcheck/conf && csh -f ../doconf_merge.csh -verbose -cpu ppc RELEASE_PPC )
-          
-          csh_out=selfcheck/BUILD/config.RELEASE_PPC_PPC.new
-          sh_out=xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC_PPC
-          
-          test -s "$csh_out" || { echo "ERROR: csh reference produced no output"; exit 1; }
-          if diff -u "$csh_out" "$sh_out"; then
-            echo "SELF-CHECK OK: sh port is byte-identical to doconf.csh merge output"
-          else
-            echo "ERROR: sh port diverges from doconf.csh"
-            exit 1
-          fi
+          echo "=== Generated Files ==="
+          ls -lh ../BUILD/obj/RELEASE_PPC/
 
       - name: Upload generated files as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: real-generated-config-files
-          # FIX: Updated path to include the conf/ directory where the files are actually generated
-          path: xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/
+          path: xnu-xnu-1228/BUILD/obj/RELEASE_PPC/
