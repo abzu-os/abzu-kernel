@@ -18,7 +18,6 @@
         owner = "apple-oss-distributions";
         repo = "xnu";
         rev = "xnu-1228";
-        # THIS IS THE CORRECT HASH PROVIDED BY NIX
         hash = "sha256-77fddC7Udhh4uuqCJuoyeAuRCNJiNBpZZgivOM8p1gU=";
       };
     in
@@ -27,8 +26,6 @@
         pname = "abzu-xnu-10-5-8";
         version = "1228";
         src = xnu-src;
-        # NOTE: sourceRoot is intentionally omitted. fetchFromGitHub handles 
-        # the extraction directory automatically (defaulting to 'source').
 
         nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
         hardeningDisable = [ "all" ];
@@ -44,6 +41,7 @@
           find . -type f -exec perl -pi -e 's/\r//g' {} \;
           
           # 3. Apply robust replacements for paths and unsupported compiler flags
+          # NOTE: Added /bin/pwd replacement which was missing previously!
           find . -type f -exec perl -pi -e \
             's|/usr/local/bin/relpath|relpath|g;
              s|/usr/bin/config|config|g;
@@ -51,6 +49,7 @@
              s|/usr/bin/uname|uname|g;
              s|/usr/sbin/sysctl|sysctl|g;
              s|/usr/bin/tr|tr|g;
+             s|/bin/pwd|pwd|g;
              s|-mno-altivec||g;
              s|-mcpu=[^ ]*||g;
              s|-arch ppc||g;
@@ -119,9 +118,6 @@ EOF
         installPhase = ''
           runHook preInstall
           mkdir -p $out
-
-          # NOTE: Removed 'make kernel'. The top-level Makefile has no 'kernel' target.
-          # The kernel is already built by the 'make' command in the buildPhase.
 
           echo "=== DEBUG: Listing main build output directory ==="
           ls -lh BUILD/obj/RELEASE_PPC/ || true
