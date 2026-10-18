@@ -139,29 +139,72 @@ jobs:
             curl -sSfL -o "$2" "$1"
           }
           
-          # Download NetBSD config tool source (VERIFIED PATHS)
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.c main.c
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkheaders.c mkheaders.c
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkmakefile.c mkmakefile.c
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkioconf.c mkioconf.c
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/gram.y gram.y
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/scan.l scan.l
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/defs.h defs.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/util.h util.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.h main.h
+          NB=https://raw.githubusercontent.com/NetBSD/src/netbsd-9
           
-          # Download missing dependency headers (VERIFIED PATHS)
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/include/vis.h vis.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/lib/libc/include/crc_extern.h crc_extern.h
-          fetch https://raw.githubusercontent.com/NetBSD/src/netbsd-9/sys/sys/sem.h sem.h
+          # Download NetBSD config tool source (VERIFIED PATHS)
+          fetch $NB/usr.bin/config/main.c main.c
+          fetch $NB/usr.bin/config/mkheaders.c mkheaders.c
+          fetch $NB/usr.bin/config/mkmakefile.c mkmakefile.c
+          fetch $NB/usr.bin/config/mkioconf.c mkioconf.c
+          fetch $NB/usr.bin/config/gram.y gram.y
+          fetch $NB/usr.bin/config/scan.l scan.l
+          fetch $NB/usr.bin/config/defs.h defs.h
+          fetch $NB/usr.bin/config/util.c util.c
+          # sem.h lives in usr.bin/config itself, NOT in sys/sys (that path 404s)
+          fetch $NB/usr.bin/config/sem.h sem.h
+          
+          # Dependency headers (VERIFIED PATHS)
+          # vis.h lives in include/, NOT lib/libc/include/ (that path 404s)
+          fetch $NB/include/vis.h vis.h
+          # crc_buf() comes from usr.bin/cksum (see usr.bin/config/Makefile);
+          # crc_extern.h does not exist under lib/libc/include/ (that path 404s)
+          fetch $NB/usr.bin/cksum/crc.c crc.c
+          fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
+          fetch $NB/usr.bin/cksum/extern.h extern.h
+          
+          # <util.h>: use the system one from libbsd-dev (/usr/include/bsd/util.h)
           
           # Create dummy sys/sysctl.h (Ubuntu 24.04 removed this from glibc)
           echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
           
-          # Safely prepend to defs.h to fix missing types
-          printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
+          # Portability shim so NetBSD sources compile against glibc
+          cat > compat.h <<'EOF'
+          /* Portability shim: build NetBSD config(8) on Linux/glibc */
+          #include <stdint.h>
+          #include <inttypes.h>
           
-          # Final sanity check: ensure no file is a 404 HTML page
+          /* glibc defines these as macros/enums that clash with NetBSD defs.h */
+          #ifdef NODEV
+          #undef NODEV
+          #endif
+          #ifdef major
+          #undef major
+          #endif
+          #ifdef minor
+          #undef minor
+          #endif
+          
+          #define __RENAME(x)
+          #define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
+          #ifndef __arraycount
+          #define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
+          #endif
+          #ifndef MIN
+          #define MIN(a,b) (((a)<(b))?(a):(b))
+          #endif
+          #ifndef MAX
+          #define MAX(a,b) (((a)>(b))?(a):(b))
+          #endif
+          EOF
+          
+          # Safely prepend the shim to defs.h to fix missing types/macros
+          printf '#include "compat.h"\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
+          
+          # gram.y calls check_version() before its static definition; add a prototype
+          sed -i 's/^static void$/void/' gram.y || true
+          printf '\nvoid check_version(void);\n' >> defs.h
+          
+          # Final sanity check: ensure no file is a 404 page
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
             echo "ERROR: A downloaded file contains a 404 error!"
             exit 1
@@ -173,13 +216,13 @@ jobs:
           # Compile with stubs for NetBSD-specific macros and safe include paths
           gcc -I. -I./sys \
               -D'__RCSID(x)=' \
-              -D'COPYRIGHT(x)=' \
               -D'__COPYRIGHT(x)=' \
               -D'__unused=' \
               -D'__printflike(x,y)=' \
               -I/usr/include/bsd \
-              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl -lbsd -lz
+              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c -lfl -lbsd -lz
           
+          test -x config || { echo "ERROR: config binary was not built"; exit 1; }
           sudo mv config /usr/local/bin/config
 
       - name: Run authentic NetBSD config tool
