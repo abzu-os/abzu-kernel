@@ -6,8 +6,8 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Use the correct official FreeBSD runtime container image
-    container: freebsd/freebsd-runtime:13.2-RELEASE
+    # Use the latest stable official FreeBSD runtime container image
+    container: freebsd/freebsd-runtime:15.1
     steps:
       - name: Install minimal dependencies
         run: pkg install -y bash curl gtar git python3
