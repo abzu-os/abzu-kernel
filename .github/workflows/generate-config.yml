@@ -126,13 +126,14 @@ jobs:
           
           mkdir -p netbsd-config
           cd netbsd-config
-          curl -sSL -o config.h https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/config.h
-          curl -sSL -o main.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/main.c
-          curl -sSL -o mkheaders.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkheaders.c
-          curl -sSL -o mkmakefile.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkmakefile.c
-          curl -sSL -o mkioconf.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkioconf.c
-          curl -sSL -o gram.y https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/gram.y
-          curl -sSL -o scan.l https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/scan.l
+          # FIX: Changed usr.sbin to usr.bin
+          curl -sSL -o config.h https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/config.h
+          curl -sSL -o main.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/main.c
+          curl -sSL -o mkheaders.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkheaders.c
+          curl -sSL -o mkmakefile.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkmakefile.c
+          curl -sSL -o mkioconf.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/mkioconf.c
+          curl -sSL -o gram.y https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/gram.y
+          curl -sSL -o scan.l https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.bin/config/scan.l
           
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
