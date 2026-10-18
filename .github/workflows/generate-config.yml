@@ -119,7 +119,28 @@ jobs:
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Run NetBSD config tool to generate final files
+      - name: Compile authentic NetBSD config tool natively on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex libbsd-dev
+          
+          mkdir -p netbsd-config
+          cd netbsd-config
+          curl -sSL -o config.h https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/config.h
+          curl -sSL -o main.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/main.c
+          curl -sSL -o mkheaders.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkheaders.c
+          curl -sSL -o mkmakefile.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkmakefile.c
+          curl -sSL -o mkioconf.c https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/mkioconf.c
+          curl -sSL -o gram.y https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/gram.y
+          curl -sSL -o scan.l https://raw.githubusercontent.com/NetBSD/src/netbsd-9/usr.sbin/config/scan.l
+          
+          bison -d -o gram.c gram.y
+          flex -o scan.c scan.l
+          gcc -I/usr/include/bsd -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl -lbsd
+          
+          sudo mv config /usr/local/bin/config
+
+      - name: Run config tool to generate final Makefile and ioconf.c
         run: |
           set -eu
           cd xnu-xnu-1228/bsd
@@ -130,10 +151,8 @@ jobs:
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          # Use a NetBSD container to run the config tool, as it has the exact authentic BSD config utility
-          docker run --rm -v $(pwd):/xnu -w /xnu netbsd/netbsd:9.0 /bin/sh -c "
-            /usr/sbin/config -c ./conf ../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
-          "
+          # Run the locally compiled authentic NetBSD config tool
+          /usr/local/bin/config -c ./conf "$CONF_FILE"
           
           echo "=== Generated Files ==="
           ls -lh ../BUILD/obj/RELEASE_PPC/
