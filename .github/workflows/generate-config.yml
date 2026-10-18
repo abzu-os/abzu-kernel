@@ -1,38 +1,183 @@
 name: Generate XNU Config Files
 
+# Generates BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC on plain Linux by
+# replicating the MASTER-merge pipeline of bsd/conf/tools/doconf/doconf.csh
+# (echo +SYS | cat MASTER{,.cpu} - MASTER{,.cpu} | sed -n ... | awk -F# ...)
+# directly with POSIX sh + GNU sed/awk. The BSD `config` C tool is never
+# invoked or compiled: its sources are not published in any xnu release
+# tarball, so this workflow eliminates that dependency entirely.
+#
+# Self-check: the job also runs the ORIGINAL doconf.csh merge stage under the
+# `csh` package against identical inputs and diffs the two merged outputs.
+
 on:
   workflow_dispatch:
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    container: debian:bookworm
     steps:
-      - name: Install build dependencies
-        run: apt-get update && apt-get install -y build-essential bison flex curl tar
-
-      - name: Download and Extract XNU 1228 Source
+      - name: Download and extract XNU 1228 source
         run: |
-          curl -L -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
+          curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
           tar -xzf xnu.tar.gz
 
-      - name: Compile 'config' tool manually (Bypassing Makefile)
-        run: |
-          cd xnu-xnu-1228/config
-          # 1. Generate parser and lexer from source
-          bison -d -o gram.c gram.y
-          flex -o scan.c scan.l
-          # 2. Compile the config tool directly with gcc, completely ignoring the XNU Makefile
-          gcc -o config main.c config.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl
+      - name: Write merge scripts (verbatim port of doconf.csh pipeline)
+        run: mkdir -p work
 
-      - name: Generate RELEASE_PPC configuration
+      # The sed script below is extracted verbatim from doconf.csh. Quoting was
+      # resolved per csh's double-quote rules: only \$, \`, \" and \\ are escapes
+      # inside "..." arguments, so \( \) \1 \2 \! survive to sed untouched.
+      # Literal tabs are embedded via a quoted heredoc (no shell expansion),
+      # which is POSIX-safe and avoids $'\t' bashisms.
+      - name: Create merge.sed
         run: |
-          cd xnu-xnu-1228
-          mkdir -p BUILD/obj/RELEASE_PPC
-          ./config/config -c ../conf BUILD/obj/RELEASE_PPC/config.RELEASE_PPC
+          cat > work/merge.sed <<'SED_EOF'
+            /^+/{
+            s;[-+];#&;gp
+            t loop
+            : loop
+            n
+            /^#/b loop
+            /^$/b loop
+            s;^\([^#]*\).*#[ 	]*<\(.*\)>[ 	]*$;\2#\1;
+            t not
+            s;\([^#]*\).*;#\1;
+            t not
+            : not
+            s;[ 	]*$;;
+            s;^\!\(.*\);\1#\!;
+            p
+            t loop
+            b loop
+            }
+            /^[^#]/d
+            s;	; ;g
+            s;^# *\([^ ]*\)[ ]*=[ ]*\[\(.*\)\].*;\1#\2;p
+          SED_EOF
 
-      - name: Upload generated files as Artifact
+      # The awk program is copied verbatim from doconf.csh. It was single-quoted
+      # there, hence fully literal -- nothing needed unescaping. Field separator
+      # is '#' (passed as -F# at invocation).
+      - name: Create merge.awk
+        run: |
+          cat > work/merge.awk <<'AWK_EOF'
+
+            part == 0 && $1 != "" {
+            	m[$1]=m[$1] " " $2;
+            	next;
+            }
+            part == 0 && $1 == "" {
+            	for (i=NF;i>1;i--){
+            		s=substr($i,2);
+            		c[++na]=substr($i,1,1);
+            		a[na]=s;
+            	}
+            	while (na > 0){
+            		s=a[na];
+            		d=c[na--];
+            		if (m[s] == "") {
+            			f[s]=d;
+            		} else {
+            			nx=split(m[s],x," ");
+            			for (j=nx;j>0;j--) {
+            				z=x[j];
+            				a[++na]=z;
+            				c[na]=d;
+            			}
+            		}
+            	}
+            	part=1;
+            	next;
+            }
+            part != 0 {
+            	if ($1 != "") {
+            		n=split($1,x,",");
+            		ok=0;
+            		for (i=1;i<=n;i++) {
+            			if (f[x[i]] == "+") {
+            				ok=1;
+            			}
+            		}
+            		if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {
+            			print $2; 
+            		}
+            	} else { 
+            		print $2; 
+            	}
+            }
+          AWK_EOF
+
+      - name: Run sh port of doconf.csh MASTER-merge pipeline
+        run: |
+          set -eu
+          cd xnu-xnu-1228/bsd/conf
+          SYS=RELEASE_PPC
+          cpu=ppc          # from: -cpu ppc  ->  lowercased
+          ID=PPC           # from: -cpu ppc  ->  uppercased
+          OBJDIR=../BUILD/obj/RELEASE_PPC/conf
+          mkdir -p "$OBJDIR"
+          MASTER=./MASTER
+          MASTER_CPU=./MASTER.ppc
+          MASTER_LOCAL=""
+          [ -f "$MASTER.local" ] && MASTER_LOCAL="$MASTER.local"
+          MASTER_CPU_LOCAL=""
+          [ -f "$MASTER_CPU.local" ] && MASTER_CPU_LOCAL="$MASTER_CPU.local"
+          # Exactly the doconf.csh input order:
+          #   cat $MASTER $MASTER_LOCAL $MASTER_CPU $MASTER_CPU_LOCAL - \
+          #       $MASTER $MASTER_LOCAL $MASTER_CPU $MASTER_CPU_LOCAL
+          # with stdin being `echo +$SYS`. Process substitution reproduces the
+          # "-" slot without needing a fifo.
+          cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} \
+              <(echo "+$SYS") \
+              "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} \
+            | sed -n -f ../../../work/merge.sed \
+            | awk -F# -f ../../../work/merge.awk \
+            > "$OBJDIR/config.${SYS}_${ID}.new"
+          test -s "$OBJDIR/config.${SYS}_${ID}.new" || {
+            echo "ERROR: merge produced empty output"; exit 1; }
+          mv "$OBJDIR/config.${SYS}_${ID}.new" "$OBJDIR/config.${SYS}_${ID}"
+          cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
+          ls -l "$OBJDIR"
+
+      - name: Self-check - run original doconf.csh (merge stage only) under csh and diff
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y csh
+          # Sandbox mirroring doconf.csh's expected layout: ../conf, ../h, ../BUILD.
+          rm -rf selfcheck && mkdir -p selfcheck/conf selfcheck/h selfcheck/BUILD
+          cp xnu-xnu-1228/bsd/conf/MASTER xnu-xnu-1228/bsd/conf/MASTER.ppc selfcheck/conf/
+          touch selfcheck/h/cs_dummy.h
+          # Truncate doconf.csh right after its awk stage (' >$SYSCONF.new) so the
+          # final `config` binary invocation (which we deliberately do not build)
+          # and the undefined OBJROOT/RELPATH/SOURCE env vars are never reached.
+          awk "/' >\\\$SYSCONF.new/{print; exit} {print}" \
+              xnu-xnu-1228/bsd/conf/tools/doconf/doconf.csh > selfcheck/doconf_merge.csh
+          echo 'exit 0' >> selfcheck/doconf_merge.csh
+          chmod +x selfcheck/doconf_merge.csh
+          ( cd selfcheck/conf && csh -f ../doconf_merge.csh -verbose -cpu ppc RELEASE_PPC )
+          csh_out=selfcheck/BUILD/config.RELEASE_PPC_PPC.new
+          sh_out=xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC_PPC
+          test -s "$csh_out" || { echo "ERROR: csh reference produced no output"; exit 1; }
+          if diff -u "$csh_out" "$sh_out"; then
+            echo "SELF-CHECK OK: sh port is byte-identical to doconf.csh merge output"
+          else
+            echo "ERROR: sh port diverges from doconf.csh"
+            exit 1
+          fi
+
+      - name: Show generated config
+        run: |
+          wc -l xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC*
+          head -20 xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
+
+      - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
         with:
           name: real-generated-config-files
-          path: xnu-xnu-1228/BUILD/obj/RELEASE_PPC/
+          path: |
+            xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
+            xnu-xnu-1228/BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC_PPC
