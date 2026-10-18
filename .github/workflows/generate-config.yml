@@ -6,7 +6,6 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Use a clean Debian container to avoid runner environment quirks
     container: debian:bookworm
     steps:
       - name: Install build dependencies
@@ -17,12 +16,14 @@ jobs:
           curl -L -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
           tar -xzf xnu.tar.gz
 
-      - name: Compile ONLY the 'config' tool
+      - name: Compile 'config' tool manually (Bypassing Makefile)
         run: |
           cd xnu-xnu-1228/config
-          make clean >/dev/null 2>&1 || true
-          # Force it to only build the 'config' binary by providing safe dummy paths
-          make SRCROOT=.. OBJROOT=/tmp/obj DSTROOT=/tmp/dst config
+          # 1. Generate parser and lexer from source
+          bison -d -o gram.c gram.y
+          flex -o scan.c scan.l
+          # 2. Compile the config tool directly with gcc, completely ignoring the XNU Makefile
+          gcc -o config main.c config.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c -lfl
 
       - name: Generate RELEASE_PPC configuration
         run: |
