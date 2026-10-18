@@ -6,8 +6,8 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Use the official FreeBSD container to get the pre-compiled, authentic config tool
-    container: freebsd/freebsd:13.2-release
+    # Use the official FreeBSD container (case-sensitive tag: 13.2-RELEASE)
+    container: freebsd/freebsd:13.2-RELEASE
     steps:
       - name: Install minimal dependencies
         run: pkg install -y bash curl gtar git python3
@@ -20,7 +20,7 @@ jobs:
           curl -sSL -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
           gtar -xzf xnu.tar.gz
 
-      - name: Create work directory and scripts via Python (No YAML escaping issues)
+      - name: Create work directory and scripts via Python
         run: |
           mkdir -p work
           python3 -c '
