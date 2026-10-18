@@ -1,0 +1,35 @@
+name: Generate XNU Config Files
+
+on:
+  workflow_dispatch: # Allows you to run this manually
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex curl tar
+
+      - name: Download XNU 1228 Source
+        run: |
+          curl -L -o xnu.tar.gz https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
+          tar -xzf xnu.tar.gz
+          cd xnu-xnu-1228
+
+      - name: Compile the 'config' tool
+        run: |
+          cd xnu-xnu-1228/config
+          make clean >/dev/null 2>&1 || true
+          make
+
+      - name: Generate RELEASE_PPC configuration
+        run: |
+          cd xnu-xnu-1228
+          mkdir -p BUILD/obj/RELEASE_PPC
+          ./config -c ../conf BUILD/obj/RELEASE_PPC/config.RELEASE_PPC
+
+      - name: Upload generated files as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-generated-config-files
+          path: xnu-xnu-1228/BUILD/obj/RELEASE_PPC/
