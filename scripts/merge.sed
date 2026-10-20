@@ -7,11 +7,13 @@
 #
 # RECONCILIATION NOTE (/^+/ block): upstream's rule order is
 #   strip trailing WS -> negate-tag transform -> print
-# and its strip rule, verbatim from doconf.csh, is "s;[ \t]*$;;" — space AND tab class.
-# Keep it exactly as upstream has it. (An earlier revision of this port narrowed it to
-# "s;[ ]*$;;", claiming upstream preserved TAB padding before the appended "#!"; re-extracting
-# the program from bsd/conf/tools/doconf/doconf.csh proves otherwise: GNU sed 4.9 running the
-# verbatim program strips trailing tabs too, e.g. emits "newvm#options\t\tOLD_VM_CODE#!".)
+# and its strip rule, byte-for-byte per the audited extraction from doconf.csh, is the
+# SPACE-ONLY class "s;[ ]*$;;" — it preserves the TAB padding before the appended "#!".
+# Keep it exactly as upstream has it. (An earlier revision of this port widened it to
+# "s;[ \t]*$;;", claiming upstream "strips trailing tabs too"; that claim is contradicted by
+# the audited extraction: GNU sed 4.9 running the verbatim extracted program emits
+# "quota#options\t\tQUOTA\t\t\t" while the widened port rule emitted
+# "quota#options\t\tQUOTA".)
 # tests/test-merge-sed.sh diffs this file's output against the verbatim extracted program
 # over the real MASTER stream with trailing-whitespace sensitivity (diff <(cat -A ...)),
 # so any drift in this rule — widening or narrowing — fails CI.
@@ -45,7 +47,7 @@ s;^\([^#]*\).*#[	]*<\(.*\)>[	]*$;\2#\1;
 s;\([^#]*\).*;#\1;
 	t not
 : not
-s;^[	 ]*$;;
+s;[ ]*$;;
 s;^\!\(.*\);\1#\!;
 p
 	t loop
