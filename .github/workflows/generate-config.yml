@@ -129,7 +129,14 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install -y build-essential bison flex libbsd-dev zlib1g-dev
+          sudo apt-get install -y build-essential bison flex zlib1g-dev
+          # NOTE: do NOT install libbsd-dev here. On Ubuntu 24.04 its headers add
+          # extern declarations of strlcpy/strlcat to <string.h>, which collide
+          # with the static inline fallbacks in compat.h below and break every
+          # translation unit ("static declaration of 'strlcpy' follows
+          # non-static declaration"). Remove it defensively in case a previous
+          # step or pre-baked image left it installed.
+          sudo apt-get remove -y libbsd-dev || true
           
           mkdir -p netbsd-config/sys
           cd netbsd-config
@@ -220,11 +227,18 @@ jobs:
           /* BSD string helpers */
           #include <sys/sysmacros.h>   /* makedev/major/minor on glibc */
           #include <unistd.h>
+          /* Only provide our own strlcpy/strlcat when the system <string.h>
+             does not already declare them. On Ubuntu 24.04 glibc >= 2.38 (and
+             libbsd-dev's overlay headers) declare strlcpy/strlcat as extern;
+             defining a static inline version afterwards is a hard error:
+             "static declaration of 'strlcpy' follows non-static declaration". */
           #ifndef HAVE_STRLCPY_PROTO
           #define HAVE_STRLCPY_PROTO 1
           #include <stddef.h>
+          #if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
           static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
           static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
+          #endif
           #endif
           
           /* minimal vis(1)/unvis escaping used by main.c */
@@ -259,6 +273,7 @@ jobs:
           EOF
           
           # Replace NetBSD-only includes with the compat shim in all sources
+          # Replace NetBSD-only includes with the compat shim in all sources
           for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h; do
             [ -f "$f" ] || continue
             sed -i \
@@ -266,6 +281,38 @@ jobs:
               -e 's|#include <util.h>|#include "compat.h"|' \
               "$f"
           done
+
+          # gram.y defines the static helper check_version() *after* the
+          # generated parser body calls it (gram.y:309 vs gram.y:1391), which
+          # makes gcc fail with:
+          #   error: static declaration of 'check_version' follows
+          #   non-static declaration
+          # Inject a prototype into the grammar's prologue so every call site
+          # sees the correct static linkage before bison generates gram.c.
+          awk '
+            /^%[{]/ { print; $0 = "static void check_version(void);" }
+            { print }
+          ' gram.y > gram.y.fixed && mv gram.y.fixed gram.y
+
+          # The sysctlbyname() branch in main.c is dead code on Linux (it only
+          # runs when config(8) is built as a NetBSD host tool and even then
+          # only for the '-x' extract mode we never use). Provide a stub so the
+          # build does not depend on removed glibc headers or libbsd.
+          cat > sys/sysctl_stub.h <<'EOF'
+          #ifndef _ABZU_SYSCTL_STUB_H_
+          #define _ABZU_SYSCTL_STUB_H_
+          #include <stddef.h>
+          static inline void *_abzu_sysctlbyname(const char *name, void *oldp,
+              size_t *oldlenp, void *newp, size_t newlen)
+          {
+              (void)name; (void)newp; (void)newlen;
+              if (oldlenp) *oldlenp = 0;
+              return oldp;
+          }
+          #define sysctlbyname(a,b,c,d,e) _abzu_sysctlbyname((a),(b),(c),(d),(e))
+          #endif
+          EOF
+          sed -i 's|^\(#include "compat.h"\)$|\1\n#include "sys/sysctl_stub.h"|' main.c
           
           # Final sanity check: ensure no file is a 404 page
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
