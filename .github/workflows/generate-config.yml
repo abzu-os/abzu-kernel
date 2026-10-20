@@ -25,10 +25,7 @@ jobs:
           mkdir -p netbsd-config/sys
           cd netbsd-config
           
-          fetch() {
-            curl -sSfL -o "$2" "$1"
-          }
-          
+          fetch() { curl -sSfL -o "$2" "$1"; }
           NB=https://raw.githubusercontent.com/NetBSD/src/netbsd-9
           
           fetch $NB/usr.bin/config/main.c main.c
@@ -47,7 +44,6 @@ jobs:
           fetch $NB/usr.bin/config/hash.c hash.c
           fetch $NB/usr.bin/config/lint.c lint.c
           fetch $NB/usr.bin/config/mkdevsw.c mkdevsw.c
-          
           fetch $NB/usr.bin/cksum/crc.c crc.c
           fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
           fetch $NB/usr.bin/cksum/extern.h extern.h
@@ -56,167 +52,164 @@ jobs:
           printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
           
           cat > sys/cdefs.h << 'EOF'
-          #pragma GCC system_header
-          #include_next <sys/cdefs.h>
-          #ifndef __RENAME
-          #define __RENAME(x)
-          #endif
-          #ifndef __dead
-          #define __dead
-          #endif
-          #ifndef ___unused
-          #define ___unused __attribute__((__unused__))
-          #endif
-          EOF
+#pragma GCC system_header
+#include_next <sys/cdefs.h>
+#ifndef __RENAME
+#define __RENAME(x)
+#endif
+#ifndef __dead
+#define __dead
+#endif
+#ifndef ___unused
+#define ___unused __attribute__((__unused__))
+#endif
+EOF
           
           cat > compat.h << 'EOF'
-          #ifndef _ABZU_COMPAT_H_
-          #define _ABZU_COMPAT_H_
-          #include <sys/types.h>
-          #include <stdint.h>
-          #include <inttypes.h>
-          #ifndef __RENAME
-          #define __RENAME(x)
-          #endif
-          #define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
-          #ifndef __arraycount
-          #define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
-          #endif
-          #ifndef MIN
-          #define MIN(a,b) (((a)<(b))?(a):(b))
-          #endif
-          #ifndef MAX
-          #define MAX(a,b) (((a)>(b))?(a):(b))
-          #endif
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include <string.h>
-          #include <stdarg.h>
-          static inline void *emalloc(size_t s){ void *p=malloc(s?s:1); if(!p){perror("emalloc");exit(1);} return p; }
-          static inline void *ecalloc(size_t n,size_t s){ void *p=calloc(n?n:1,s?s:1); if(!p){perror("ecalloc");exit(1);} return p; }
-          static inline void *erealloc(void *p,size_t s){ void *q=realloc(p,s?s:1); if(!q){perror("erealloc");exit(1);} return q; }
-          static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
-          static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
-          #include <sys/sysmacros.h>
-          #include <unistd.h>
-          #ifndef HAVE_STRLCPY_PROTO
-          #define HAVE_STRLCPY_PROTO 1
-          #include <stddef.h>
-          #if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
-          static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
-          static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
-          #endif
-          #endif
-          #define VIS_TAB 0x01
-          #define VIS_NL  0x02
-          #define VIS_SAFE 0x04
-          static inline int strvis(char *dst,const char *src,int flag){
-            char *p=dst; unsigned char c;
-            while((c=(unsigned char)*src++)!='\0'){
-              if(c=='\t'){ if(dst){*p++='\\';*p++='t';} }
-              else if(c=='\n'){ if(dst){*p++='\\';*p++='n';} }
-              else if(c=='\\'){ if(dst){*p++='\\';*p++='\\';} }
-              else { if(dst)*p++=c; }
-            }
-            if(dst)*p='\0'; return (int)(p-dst);
-          }
-          static inline int strunvis(char *dst,const char *src){
-            char *p=dst; char c;
-            while((c=*src++)!='\0'){
-              if(c=='\\'&&*src){
-                switch(*src){
-                  case 't': *p++='\t'; src++; break;
-                  case 'n': *p++='\n'; src++; break;
-                  case '\\': *p++='\\'; src++; break;
-                  default: *p++=c; break;
-                }
-              } else *p++=c;
-            }
-            *p='\0'; return (int)(p-dst);
-          }
-          #endif
-          EOF
+#ifndef _ABZU_COMPAT_H_
+#define _ABZU_COMPAT_H_
+#include <sys/types.h>
+#include <stdint.h>
+#include <inttypes.h>
+#ifndef __RENAME
+#define __RENAME(x)
+#endif
+#define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
+#ifndef __arraycount
+#define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+#ifndef MIN
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#endif
+#ifndef MAX
+#define MAX(a,b) (((a)>(b))?(a):(b))
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+static inline void *emalloc(size_t s){ void *p=malloc(s?s:1); if(!p){perror("emalloc");exit(1);} return p; }
+static inline void *ecalloc(size_t n,size_t s){ void *p=calloc(n?n:1,s?s:1); if(!p){perror("ecalloc");exit(1);} return p; }
+static inline void *erealloc(void *p,size_t s){ void *q=realloc(p,s?s:1); if(!q){perror("erealloc");exit(1);} return q; }
+static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
+static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
+#include <sys/sysmacros.h>
+#include <unistd.h>
+#ifndef HAVE_STRLCPY_PROTO
+#define HAVE_STRLCPY_PROTO 1
+#include <stddef.h>
+#if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
+static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
+static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
+#endif
+#endif
+#define VIS_TAB 0x01
+#define VIS_NL  0x02
+#define VIS_SAFE 0x04
+static inline int strvis(char *dst,const char *src,int flag){
+  char *p=dst; unsigned char c;
+  while((c=(unsigned char)*src++)!='\0'){
+    if(c=='\t'){ if(dst){*p++='\\';*p++='t';} }
+    else if(c=='\n'){ if(dst){*p++='\\';*p++='n';} }
+    else if(c=='\\'){ if(dst){*p++='\\';*p++='\\';} }
+    else { if(dst)*p++=c; }
+  }
+  if(dst)*p='\0'; return (int)(p-dst);
+}
+static inline int strunvis(char *dst,const char *src){
+  char *p=dst; char c;
+  while((c=*src++)!='\0'){
+    if(c=='\\'&&*src){
+      switch(*src){
+        case 't': *p++='\t'; src++; break;
+        case 'n': *p++='\n'; src++; break;
+        case '\\': *p++='\\'; src++; break;
+        default: *p++=c; break;
+      }
+    } else *p++=c;
+  }
+  *p='\0'; return (int)(p-dst);
+}
+#endif
+EOF
           
           for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h mkswap.c pack.c sem.c files.c hash.c lint.c mkdevsw.c; do
             [ -f "$f" ] || continue
-            sed -i \
-              -e 's|#include <vis.h>|#include "compat.h"|' \
-              -e 's|#include <util.h>|#include "compat.h"|' \
-              "$f"
+            sed -i -e 's|#include <vis.h>|#include "compat.h"|' -e 's|#include <util.h>|#include "compat.h"|' "$f"
           done
 
           awk '/^%[{]/ { print; $0 = "static void check_version(void);" } { print }' gram.y > gram.y.fixed && mv gram.y.fixed gram.y
 
           cat > sys/sysctl_stub.h << 'EOF'
-          #ifndef _ABZU_SYSCTL_STUB_H_
-          #define _ABZU_SYSCTL_STUB_H_
-          #include <stddef.h>
-          static inline void *_abzu_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
-          {
-              (void)name; (void)newp; (void)newlen;
-              if (oldlenp) *oldlenp = 0;
-              return oldp;
-          }
-          #define sysctlbyname(a,b,c,d,e) _abzu_sysctlbyname((a),(b),(c),(d),(e))
-          #endif
-          EOF
+#ifndef _ABZU_SYSCTL_STUB_H_
+#define _ABZU_SYSCTL_STUB_H_
+#include <stddef.h>
+static inline void *_abzu_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+{
+    (void)name; (void)newp; (void)newlen;
+    if (oldlenp) *oldlenp = 0;
+    return oldp;
+}
+#define sysctlbyname(a,b,c,d,e) _abzu_sysctlbyname((a),(b),(c),(d),(e))
+#endif
+EOF
           sed -i 's|^\(#include "compat.h"\)$|\1\n#include "sys/sysctl_stub.h"|' main.c
-          
-          if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
-            echo "ERROR: A downloaded file contains a 404 error!"
-            exit 1
-          fi
           
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
           
-          gcc -I. -I./sys \
-              -DMAKE_BOOTSTRAP \
-              -include compat.h \
-              -D'__RCSID(x)=' \
-              -D'__COPYRIGHT(x)=' \
-              -D'__unused=' \
-              -D'__printflike(x,y)=' \
-              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c mkswap.c pack.c sem.c files.c hash.c lint.c mkdevsw.c -lfl
+          gcc -I. -I./sys -DMAKE_BOOTSTRAP -include compat.h -D'__RCSID(x)=' -D'__COPYRIGHT(x)=' -D'__unused=' -D'__printflike(x,y)=' -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c mkswap.c pack.c sem.c files.c hash.c lint.c mkdevsw.c -lfl
           
           test -x config || { echo "ERROR: config binary was not built"; exit 1; }
           sudo mv config /usr/local/bin/config
           sudo ln -sf /usr/local/bin/config /usr/bin/config
 
-      - name: Setup and Run XNU doconf
+      - name: Generate Config and Run Tool
         run: |
           set -eu
-          
-          # Install csh since doconf.csh requires it (shebang is #!/bin/csh)
-          sudo apt-get update
-          sudo apt-get install -y csh
-          
-          cp xnu-xnu-1228/bsd/conf/tools/doconf/doconf.csh /usr/local/bin/doconf
-          chmod +x /usr/local/bin/doconf
-          
-          # Patch doconf.csh to output to the correct directory and use modern config syntax
-          sed -i 's|set OBJDIR=../BUILD|set OBJDIR=../BUILD/obj/RELEASE_PPC|' /usr/local/bin/doconf
-          sed -i 's|\$CONFIG_DIR/config -c \$MASTER_DIR -p \$SYSCONF|\$CONFIG_DIR/config \$SYSCONF|' /usr/local/bin/doconf
-          sed -i 's|\$CONFIG_DIR/config -c \$MASTER_DIR \$SYSCONF|\$CONFIG_DIR/config \$SYSCONF|' /usr/local/bin/doconf
-          
-          # Create a dummy relpath script that doconf.csh expects
-          echo '#!/bin/sh' > /tmp/relpath
-          echo 'echo "$2"' >> /tmp/relpath
-          chmod +x /tmp/relpath
-          
-          # Set environment variables expected by doconf.csh
-          export RELPATH=/tmp/relpath
-          export OBJROOT=.
-          export SOURCE=.
-          export SRCROOT=.
-          
-          # Run doconf from the conf directory so ../conf and ../BUILD resolve correctly!
-          # We use -config to run the config tool, but omit -make since we only want to generate the files.
           cd xnu-xnu-1228/bsd/conf
-          /usr/local/bin/doconf -cpu ppc -config RELEASE_PPC
+          
+          SYS=RELEASE_PPC
+          cpu=ppc
+          ID=PPC
+          OBJDIR=../../BUILD/obj/RELEASE_PPC
+          mkdir -p "$OBJDIR"
+          
+          MASTER=./MASTER
+          MASTER_CPU=./MASTER.ppc
+          MASTER_LOCAL=""
+          [ -f "$MASTER.local" ] && MASTER_LOCAL="$MASTER.local"
+          MASTER_CPU_LOCAL=""
+          [ -f "$MASTER_CPU.local" ] && MASTER_CPU_LOCAL="$MASTER_CPU.local"
+          
+          # Use the clean, repository-hosted scripts. No YAML escaping hell.
+          echo "+$SYS" | \
+          cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} - \
+              "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} | \
+          sed -n -f ../../../scripts/merge.sed | \
+          awk -F# -f ../../../scripts/merge.awk > "$OBJDIR/config.${SYS}_${ID}.new"
+          
+          if [ ! -s "$OBJDIR/config.${SYS}_${ID}.new" ]; then
+              echo "ERROR: merge produced empty output"
+              exit 1
+          fi
+          
+          mv "$OBJDIR/config.${SYS}_${ID}.new" "$OBJDIR/config.${SYS}_${ID}"
+          cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
+          
+          # Append paths for the config tool
+          echo 'builddir	"."' >> "$OBJDIR/config.${SYS}"
+          echo 'objectdir	"'"$OBJDIR"'"' >> "$OBJDIR/config.${SYS}"
+          echo 'sourcedir	"../../../.."' >> "$OBJDIR/config.${SYS}"
+          
+          # Run the config tool directly
+          cd "$OBJDIR"
+          /usr/local/bin/config "config.${SYS}"
           
           echo "=== Generated Files ==="
-          ls -lh ../BUILD/obj/RELEASE_PPC/
+          ls -lh
 
       - name: Upload generated files as Artifact
         uses: actions/upload-artifact@v4
