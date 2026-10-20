@@ -129,9 +129,7 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
-          # FIX: Added libfl-dev to provide the -lfl linker library
           sudo apt-get install -y build-essential bison flex libfl-dev zlib1g-dev
-          
           sudo apt-get remove -y libbsd-dev || true
           
           mkdir -p netbsd-config/sys
@@ -143,6 +141,7 @@ jobs:
           
           NB=https://raw.githubusercontent.com/NetBSD/src/netbsd-9
           
+          # Download ALL NetBSD config tool source files
           fetch $NB/usr.bin/config/main.c main.c
           fetch $NB/usr.bin/config/mkheaders.c mkheaders.c
           fetch $NB/usr.bin/config/mkmakefile.c mkmakefile.c
@@ -153,6 +152,17 @@ jobs:
           fetch $NB/usr.bin/config/util.c util.c
           fetch $NB/usr.bin/config/sem.h sem.h
           
+          # MISSING FILES THAT CAUSED THE LINKER ERRORS:
+          fetch $NB/usr.bin/config/mkswap.c mkswap.c
+          fetch $NB/usr.bin/config/pack.c pack.c
+          fetch $NB/usr.bin/config/sem.c sem.c
+          fetch $NB/usr.bin/config/expr.c expr.c
+          fetch $NB/usr.bin/config/devsw.c devsw.c
+          fetch $NB/usr.bin/config/files.c files.c
+          fetch $NB/usr.bin/config/hash.c hash.c
+          fetch $NB/usr.bin/config/intern.c intern.c
+          
+          # Dependency headers from cksum
           fetch $NB/usr.bin/cksum/crc.c crc.c
           fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
           fetch $NB/usr.bin/cksum/extern.h extern.h
@@ -247,7 +257,7 @@ jobs:
           #endif
           EOF
           
-          for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h; do
+          for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h mkswap.c pack.c sem.c expr.c devsw.c files.c hash.c intern.c; do
             [ -f "$f" ] || continue
             sed -i \
               -e 's|#include <vis.h>|#include "compat.h"|' \
@@ -284,6 +294,7 @@ jobs:
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
           
+          # Compile with ALL the missing .c files included!
           gcc -I. -I./sys \
               -DMAKE_BOOTSTRAP \
               -include compat.h \
@@ -291,7 +302,7 @@ jobs:
               -D'__COPYRIGHT(x)=' \
               -D'__unused=' \
               -D'__printflike(x,y)=' \
-              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c -lfl
+              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c mkswap.c pack.c sem.c expr.c devsw.c files.c hash.c intern.c -lfl
           
           test -x config || { echo "ERROR: config binary was not built"; exit 1; }
           sudo mv config /usr/local/bin/config
