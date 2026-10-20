@@ -27,3 +27,5 @@ Thumbs.db
 coverage/
 htmlcov/
 .coverage
+tests/work/
+!tests/work/.gitkeep
