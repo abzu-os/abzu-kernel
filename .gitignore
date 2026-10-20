@@ -1,1 +1,8 @@
 job-logs.txt
+result
+.result/
+.direnv/
+BUILD/
+*.o
+*.bundle
+scratch-*
