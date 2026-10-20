@@ -315,7 +315,8 @@ jobs:
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          /usr/local/bin/config -c ./conf "$CONF_FILE"
+          # FIX: Removed "-c ./conf". NetBSD 9 config takes the file as a direct argument.
+          /usr/local/bin/config "$CONF_FILE"
           
           echo "=== Generated Files ==="
           ls -lh ../BUILD/obj/RELEASE_PPC/
