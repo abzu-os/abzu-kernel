@@ -154,37 +154,47 @@ jobs:
           fetch $NB/usr.bin/config/sem.h sem.h
           
           # Dependency headers (VERIFIED PATHS)
-          # vis.h lives in include/, NOT lib/libc/include/ (that path 404s)
-          fetch $NB/include/vis.h vis.h
-          # crc_buf() comes from usr.bin/cksum (see usr.bin/config/Makefile);
-          # crc_extern.h does not exist under lib/libc/include/ (that path 404s)
+          # crc_buf() comes from usr.bin/cksum (see usr.bin/config/Makefile)
           fetch $NB/usr.bin/cksum/crc.c crc.c
           fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
           fetch $NB/usr.bin/cksum/extern.h extern.h
           
-          # <util.h>: use the system one from libbsd-dev (/usr/include/bsd/util.h)
+          # NOTE: we do NOT download NetBSD's <vis.h>/<util.h> and we do NOT
+          # use -I/usr/include/bsd. libbsd's overlay headers shadow glibc's
+          # <sys/cdefs.h> and cause infinite #include_next recursion, and
+          # NetBSD's vis.h/util.h reference __RENAME/emalloc which glibc lacks.
+          # Instead we provide small local compat headers below.
           
           # Create dummy sys/sysctl.h (Ubuntu 24.04 removed this from glibc)
           echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
           
-          # Portability shim so NetBSD sources compile against glibc
+          # Wrapper for <sys/cdefs.h>: pass through to glibc, add NetBSD bits
+          cat > sys/cdefs.h <<'EOF'
+          #pragma GCC system_header
+          #include_next <sys/cdefs.h>
+          #ifndef __RENAME
+          #define __RENAME(x)
+          #endif
+          #ifndef __dead
+          #define __dead
+          #endif
+          #ifndef ___unused
+          #define ___unused __attribute__((__unused__))
+          #endif
+          EOF
+          
+          # Portability shim force-included into every translation unit
           cat > compat.h <<'EOF'
           /* Portability shim: build NetBSD config(8) on Linux/glibc */
+          #ifndef _ABZU_COMPAT_H_
+          #define _ABZU_COMPAT_H_
+          #include <sys/types.h>
           #include <stdint.h>
           #include <inttypes.h>
           
-          /* glibc defines these as macros/enums that clash with NetBSD defs.h */
-          #ifdef NODEV
-          #undef NODEV
-          #endif
-          #ifdef major
-          #undef major
-          #endif
-          #ifdef minor
-          #undef minor
-          #endif
-          
+          #ifndef __RENAME
           #define __RENAME(x)
+          #endif
           #define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
           #ifndef __arraycount
           #define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
@@ -195,14 +205,67 @@ jobs:
           #ifndef MAX
           #define MAX(a,b) (((a)>(b))?(a):(b))
           #endif
+          
+          /* BSD-style checked allocators used by config(8) (from libutil) */
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <stdarg.h>
+          static inline void *emalloc(size_t s){ void *p=malloc(s?s:1); if(!p){perror("emalloc");exit(1);} return p; }
+          static inline void *ecalloc(size_t n,size_t s){ void *p=calloc(n?n:1,s?s:1); if(!p){perror("ecalloc");exit(1);} return p; }
+          static inline void *erealloc(void *p,size_t s){ void *q=realloc(p,s?s:1); if(!q){perror("erealloc");exit(1);} return q; }
+          static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
+          static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
+          
+          /* BSD string helpers */
+          #include <sys/sysmacros.h>   /* makedev/major/minor on glibc */
+          #include <unistd.h>
+          #ifndef HAVE_STRLCPY_PROTO
+          #define HAVE_STRLCPY_PROTO 1
+          #include <stddef.h>
+          static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
+          static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
+          #endif
+          
+          /* minimal vis(1)/unvis escaping used by main.c */
+          #define VIS_TAB 0x01
+          #define VIS_NL  0x02
+          #define VIS_SAFE 0x04
+          static inline int strvis(char *dst,const char *src,int flag){
+            char *p=dst; unsigned char c;
+            while((c=(unsigned char)*src++)!='\0'){
+              if(c=='\t'){ if(dst){*p++='\\';*p++='t';} }
+              else if(c=='\n'){ if(dst){*p++='\\';*p++='n';} }
+              else if(c=='\\'){ if(dst){*p++='\\';*p++='\\';} }
+              else { if(dst)*p++=c; }
+            }
+            if(dst)*p='\0'; return (int)(p-dst);
+          }
+          static inline int strunvis(char *dst,const char *src){
+            char *p=dst; char c;
+            while((c=*src++)!='\0'){
+              if(c=='\\'&&*src){
+                switch(*src){
+                  case 't': *p++='\t'; src++; break;
+                  case 'n': *p++='\n'; src++; break;
+                  case '\\': *p++='\\'; src++; break;
+                  default: *p++=c; break;
+                }
+              } else *p++=c;
+            }
+            *p='\0'; return (int)(p-dst);
+          }
+          #endif /* _ABZU_COMPAT_H_ */
           EOF
           
-          # Safely prepend the shim to defs.h to fix missing types/macros
-          printf '#include "compat.h"\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
-          
-          # gram.y calls check_version() before its static definition; add a prototype
-          sed -i 's/^static void$/void/' gram.y || true
-          printf '\nvoid check_version(void);\n' >> defs.h
+          # Replace NetBSD-only includes with the compat shim in all sources
+          for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h; do
+            [ -f "$f" ] || continue
+            sed -i \
+              -e 's|#include <vis.h>|#include "compat.h"|' \
+              -e 's|#include <util.h>|#include "compat.h"|' \
+              "$f"
+          done
           
           # Final sanity check: ensure no file is a 404 page
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
@@ -213,14 +276,19 @@ jobs:
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
           
-          # Compile with stubs for NetBSD-specific macros and safe include paths
+          # Compile with stubs for NetBSD-specific macros and safe include paths.
+          # -DMAKE_BOOTSTRAP activates the portable dev_t/NODEV/NODEVMAJOR/
+          # major/minor/makedev definitions inside NetBSD's defs.h.
+          # -include compat.h injects the shim before any source line, fixing
+          # uint32_t (crc), __RENAME (vis.h) and the missing emalloc family.
           gcc -I. -I./sys \
+              -DMAKE_BOOTSTRAP \
+              -include compat.h \
               -D'__RCSID(x)=' \
               -D'__COPYRIGHT(x)=' \
               -D'__unused=' \
               -D'__printflike(x,y)=' \
-              -I/usr/include/bsd \
-              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c -lfl -lbsd -lz
+              -o config main.c mkheaders.c mkmakefile.c mkioconf.c gram.c scan.c util.c crc.c -lfl
           
           test -x config || { echo "ERROR: config binary was not built"; exit 1; }
           sudo mv config /usr/local/bin/config
