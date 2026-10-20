@@ -328,24 +328,10 @@ jobs:
           test -f "$MASTER"
           test -f "$MASTER_CPU"
 
-          # merge.sed's table-building phase deletes every line that does not
-          # start with '#'. Therefore MASTER.local must preserve the comment
-          # prefix. Do NOT strip it here.
-          {
-            awk '
-              /^[[:space:]]*#[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\[/ {
-                line = $0
-                sub(/^[[:space:]]*#[[:space:]]*/, "", line)
-                gsub(/\t/, "  ", line)
-                sub(/[[:space:]]*=[[:space:]]*\[/, " = [", line)
-                print "# " line
-              }
-            ' "$MASTER" "$MASTER_CPU"
-          } > MASTER.local
-
-          if ! grep -q '^# ' MASTER.local; then
-            echo "ERROR: no MASTER tag-table rows were extracted" >&2
-            exit 1
+          # Optional per-checkout overrides, exactly as upstream doconf.csh.
+          MASTER_LOCAL=""
+          if [ -f "${MASTER}.local" ]; then
+            MASTER_LOCAL="${MASTER}.local"
           fi
 
           MASTER_CPU_LOCAL=""
@@ -353,15 +339,16 @@ jobs:
             MASTER_CPU_LOCAL="${MASTER_CPU}.local"
           fi
 
-          master_files=("$MASTER" "$MASTER_CPU")
-          if [ -n "$MASTER_CPU_LOCAL" ]; then
-            master_files+=("$MASTER_CPU_LOCAL")
-          fi
-
+          # The tag-lookup table must be built from the REAL MASTER and
+          # MASTER.ppc files before the +SYS marker.  The same files are
+          # repeated after the marker so the emission phase sees the
+          # configuration lines.  This mirrors doconf.csh exactly.
           {
-            cat MASTER.local
+            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
             printf '+%s\n' "$SYS"
-            cat "${master_files[@]}"
+            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
           } | \
             sed -n -f ../../../scripts/merge.sed | \
             awk -F'#' -f ../../../scripts/merge.awk \
@@ -384,9 +371,8 @@ jobs:
           mv "$merged" "${OBJDIR}/config.${SYS}_${ID}"
           cp "${OBJDIR}/config.${SYS}_${ID}" "${OBJDIR}/config.${SYS}"
 
-          # NetBSD config expects sourcedir to contain conf/files. For XNU
-          # that directory is bsd/, which is ../../.. from this OBJDIR.
-          # objectdir is the directory config is run from.
+          # NetBSD config must be run from the object directory.
+          # sourcedir is the directory containing conf/files, i.e. bsd/.
           {
             printf 'builddir\t"."\n'
             printf 'objectdir\t"."\n'
