@@ -1,64 +1,393 @@
-name: Build Abzu Kernel
+name: Generate XNU Config Files
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    # Switch to Linux: Instant queues, no Intel Mac dependency, true cross-compilation
-    runs-on: ubuntu-latest
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build utilities required by the XNU build system
+      - name: Download and extract XNU 1228 source
+        shell: bash
         run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o xnu.tar.gz \
+            https://github.com/apple-oss-distributions/xnu/archive/refs/tags/xnu-1228.tar.gz
+          tar -xzf xnu.tar.gz
+          test -d xnu-xnu-1228
+
+      - name: Build NetBSD config tool
+        shell: bash
+        run: |
+          set -euo pipefail
+
           sudo apt-get update
-          # NOTE: `config` (the BSD kernel-config script XNU invokes) is
-          # NOT provided by bsdmainutils -- that package only ships
-          # calendar/hexdump etc. and does not exist at all on current
-          # Ubuntu runners, so installing it fails the whole job with
-          # "Unable to locate package". The flake's patchPhase rewrites
-          # the hardcoded /usr/bin/config and /usr/sbin/config paths in
-          # XNU's makefiles to a bare `config`, which must then resolve
-          # from PATH inside the Nix sandbox; no host package is needed
-          # (and even if it were, apt packages cannot cross the Nix
-          # sandbox boundary into nix build).
-          sudo apt-get install -y bsdextrautils findutils
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison flex libfl-dev zlib1g-dev
+          sudo apt-get remove -y libbsd-dev || true
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+          rm -rf netbsd-config
+          mkdir -p netbsd-config/sys
+          cd netbsd-config
 
-      - name: Build Kernel
-        run: nix build .#abzu-xnu-10-5-8
+          fetch() {
+            curl -fsSL --retry 3 -o "$2" "$1"
+          }
+          NB="https://raw.githubusercontent.com/NetBSD/src/netbsd-9"
 
-      - name: Prepare Artifact
+          fetch "$NB/usr.bin/config/main.c" main.c
+          fetch "$NB/usr.bin/config/mkheaders.c" mkheaders.c
+          fetch "$NB/usr.bin/config/mkmakefile.c" mkmakefile.c
+          fetch "$NB/usr.bin/config/mkioconf.c" mkioconf.c
+          fetch "$NB/usr.bin/config/gram.y" gram.y
+          fetch "$NB/usr.bin/config/scan.l" scan.l
+          fetch "$NB/usr.bin/config/defs.h" defs.h
+          fetch "$NB/usr.bin/config/util.c" util.c
+          fetch "$NB/usr.bin/config/sem.h" sem.h
+          fetch "$NB/usr.bin/config/mkswap.c" mkswap.c
+          fetch "$NB/usr.bin/config/pack.c" pack.c
+          fetch "$NB/usr.bin/config/sem.c" sem.c
+          fetch "$NB/usr.bin/config/files.c" files.c
+          fetch "$NB/usr.bin/config/hash.c" hash.c
+          fetch "$NB/usr.bin/config/lint.c" lint.c
+          fetch "$NB/usr.bin/config/mkdevsw.c" mkdevsw.c
+          fetch "$NB/usr.bin/cksum/crc.c" crc.c
+          fetch "$NB/usr.bin/cksum/crc_extern.h" crc_extern.h
+          fetch "$NB/usr.bin/cksum/extern.h" extern.h
+
+          # Ubuntu 24.04 compatibility shims.
+          printf '// dummy header for Ubuntu 24.04 compatibility\n' > sys/sysctl.h
+
+          {
+            printf '#include <stdint.h>\n'
+            printf 'typedef int devmajor_t;\n'
+            cat defs.h
+          } > temp_defs.h
+          mv temp_defs.h defs.h
+
+          cat > sys/cdefs.h <<'EOF'
+          #pragma GCC system_header
+          #include_next <sys/cdefs.h>
+          #ifndef __RENAME
+          #define __RENAME(x)
+          #endif
+          #ifndef __dead
+          #define __dead
+          #endif
+          #ifndef ___unused
+          #define ___unused __attribute__((__unused__))
+          #endif
+          EOF
+
+          cat > compat.h <<'EOF'
+          #ifndef _ABZU_COMPAT_H_
+          #define _ABZU_COMPAT_H_
+
+          #include <sys/types.h>
+          #include <stdint.h>
+          #include <inttypes.h>
+
+          #ifndef __RENAME
+          #define __RENAME(x)
+          #endif
+
+          #define __UNCONST(a) ((void *)(unsigned long)(const void *)(a))
+
+          #ifndef __arraycount
+          #define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
+          #endif
+
+          #ifndef MIN
+          #define MIN(a,b) (((a)<(b))?(a):(b))
+          #endif
+
+          #ifndef MAX
+          #define MAX(a,b) (((a)>(b))?(a):(b))
+          #endif
+
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <stdarg.h>
+
+          static inline void *emalloc(size_t s) {
+            void *p = malloc(s ? s : 1);
+            if (!p) {
+              perror("emalloc");
+              exit(1);
+            }
+            return p;
+          }
+
+          static inline void *ecalloc(size_t n, size_t s) {
+            void *p = calloc(n ? n : 1, s ? s : 1);
+            if (!p) {
+              perror("ecalloc");
+              exit(1);
+            }
+            return p;
+          }
+
+          static inline void *erealloc(void *p, size_t s) {
+            void *q = realloc(p, s ? s : 1);
+            if (!q) {
+              perror("erealloc");
+              exit(1);
+            }
+            return q;
+          }
+
+          static inline char *estrdup(const char *s) {
+            char *q = strdup(s);
+            if (!q) {
+              perror("estrdup");
+              exit(1);
+            }
+            return q;
+          }
+
+          static inline int easprintf(char **strp, const char *fmt, ...) {
+            va_list ap;
+            int r;
+            va_start(ap, fmt);
+            r = vasprintf(strp, fmt, ap);
+            va_end(ap);
+            if (r < 0) {
+              perror("easprintf");
+              exit(1);
+            }
+            return r;
+          }
+
+          #include <sys/sysmacros.h>
+          #include <unistd.h>
+
+          #ifndef HAVE_STRLCPY_PROTO
+          #define HAVE_STRLCPY_PROTO 1
+          #include <stddef.h>
+
+          #if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
+          static inline size_t strlcpy(char *d, const char *s, size_t n) {
+            size_t l = strlen(s);
+            if (n) {
+              if (l >= n) {
+                memcpy(d, s, n - 1);
+                d[n - 1] = '\0';
+              } else {
+                memcpy(d, s, l + 1);
+              }
+            }
+            return l;
+          }
+
+          static inline size_t strlcat(char *d, const char *s, size_t n) {
+            size_t dl = strlen(d);
+            size_t sl = strlen(s);
+            if (dl >= n) {
+              return n + sl;
+            }
+            return dl + strlcpy(d + dl, s, n - dl);
+          }
+          #endif
+          #endif
+
+          #define VIS_TAB  0x01
+          #define VIS_NL   0x02
+          #define VIS_SAFE 0x04
+
+          static inline int strvis(char *dst, const char *src, int flag) {
+            char *p = dst;
+            unsigned char c;
+            (void)flag;
+            while ((c = (unsigned char)*src++) != '\0') {
+              if (c == '\t') {
+                if (dst) { *p++ = '\\'; *p++ = 't'; }
+              } else if (c == '\n') {
+                if (dst) { *p++ = '\\'; *p++ = 'n'; }
+              } else if (c == '\\') {
+                if (dst) { *p++ = '\\'; *p++ = '\\'; }
+              } else {
+                if (dst) *p++ = (char)c;
+              }
+            }
+            if (dst) *p = '\0';
+            return dst ? (int)(p - dst) : 0;
+          }
+
+          static inline int strunvis(char *dst, const char *src) {
+            char *p = dst;
+            char c;
+            while ((c = *src++) != '\0') {
+              if (c == '\\' && *src) {
+                switch (*src) {
+                  case 't': *p++ = '\t'; src++; break;
+                  case 'n': *p++ = '\n'; src++; break;
+                  case '\\': *p++ = '\\'; src++; break;
+                  default: *p++ = c; break;
+                }
+              } else {
+                *p++ = c;
+              }
+            }
+            if (dst) *p = '\0';
+            return dst ? (int)(p - dst) : 0;
+          }
+          #endif
+          EOF
+
+          for f in \
+            main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l \
+            crc.c extern.h crc_extern.h defs.h mkswap.c pack.c sem.c files.c \
+            hash.c lint.c mkdevsw.c; do
+            [ -f "$f" ] || continue
+            sed -i \
+              -e 's|#include <vis.h>|#include "compat.h"|' \
+              -e 's|#include <util.h>|#include "compat.h"|' \
+              "$f"
+          done
+
+          # Forward declaration only; the real definition is later in gram.y.
+          sed -i '/^%{/a static void check_version(void);' gram.y
+
+          cat > sys/sysctl_stub.h <<'EOF'
+          #ifndef _ABZU_SYSCTL_STUB_H_
+          #define _ABZU_SYSCTL_STUB_H_
+
+          #include <stddef.h>
+
+          static inline void *_abzu_sysctlbyname(const char *name, void *oldp,
+                                                 size_t *oldlenp, void *newp,
+                                                 size_t newlen)
+          {
+              (void)name;
+              (void)newp;
+              (void)newlen;
+              if (oldlenp) *oldlenp = 0;
+              return oldp;
+          }
+
+          #define sysctlbyname(a,b,c,d,e) \
+              _abzu_sysctlbyname((a),(b),(c),(d),(e))
+
+          #endif
+          EOF
+
+          if ! grep -q '^#include "compat.h"$' main.c; then
+            echo "ERROR: main.c does not include compat.h" >&2
+            exit 1
+          fi
+
+          sed -i \
+            's|^#include "compat.h"$|#include "compat.h"\n#include "sys/sysctl_stub.h"|' \
+            main.c
+
+          bison -d -o gram.c gram.y
+          flex -o scan.c scan.l
+
+          gcc -I. -I./sys -D_GNU_SOURCE -DMAKE_BOOTSTRAP -include compat.h \
+            -D'__RCSID(x)=' \
+            -D'__COPYRIGHT(x)=' \
+            -D'__unused=' \
+            -D'__printflike(x,y)=' \
+            -o config \
+            main.c mkheaders.c mkmakefile.c mkioconf.c \
+            gram.c scan.c util.c crc.c mkswap.c pack.c sem.c files.c \
+            hash.c lint.c mkdevsw.c -lfl
+
+          test -x config || {
+            echo "ERROR: config binary was not built" >&2
+            exit 1
+          }
+
+          sudo install -m 0755 config /usr/local/bin/config
+          sudo ln -sfn /usr/local/bin/config /usr/bin/config
+
+      - name: Generate config files
+        shell: bash
         run: |
-          mkdir -p artifacts
-          # After `nix build`, BUILD/ does not exist in the workspace --
-          # it lives inside the Nix store during the build. The only
-          # output visible to CI is the result symlink created by
-          # `nix build .#abzu-xnu-10-5-8`, whose top level contains the
-          # installed mach_kernel. Copying from result/ is what actually
-          # works here; the old BUILD/-based copies silently produced an
-          # empty artifacts dir, which then failed upload-artifact's
-          # if-no-files-found: error check.
-          echo "=== DEBUG: Listing nix build result ==="
-          ls -lhR result/ || true
+          set -euo pipefail
 
-          cp result/mach_kernel artifacts/ 2>/dev/null \
-            || find result/ -type f -exec cp -t artifacts/ {} + \
-            || echo "ERROR: nothing found in result/"
+          cd xnu-xnu-1228/bsd/conf
 
-          echo "=== DEBUG: Final contents of artifacts ==="
-          ls -lh artifacts/
-          test -s artifacts/mach_kernel || { echo "ERROR: artifacts/mach_kernel missing or empty"; exit 1; }
+          SYS="RELEASE_PPC"
+          cpu="ppc"
+          ID="PPC"
+          OBJDIR="../../BUILD/obj/${SYS}"
+          mkdir -p "$OBJDIR"
 
-      - name: Upload Kernel Artifact
+          MASTER="./MASTER"
+          MASTER_CPU="./MASTER.${cpu}"
+          test -f "$MASTER"
+          test -f "$MASTER_CPU"
+
+          # Optional per-checkout overrides, exactly as upstream doconf.csh.
+          MASTER_LOCAL=""
+          if [ -f "${MASTER}.local" ]; then
+            MASTER_LOCAL="${MASTER}.local"
+          fi
+
+          MASTER_CPU_LOCAL=""
+          if [ -f "${MASTER_CPU}.local" ]; then
+            MASTER_CPU_LOCAL="${MASTER_CPU}.local"
+          fi
+
+          # The tag-lookup table must be built from the REAL MASTER and
+          # MASTER.ppc files before the +SYS marker.  The same files are
+          # repeated after the marker so the emission phase sees the
+          # configuration lines.  This mirrors doconf.csh exactly.
+          {
+            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
+            printf '+%s\n' "$SYS"
+            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
+                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
+          } | \
+            sed -n -f ../../../scripts/merge.sed | \
+            awk -F'#' -f ../../../scripts/merge.awk \
+              > "${OBJDIR}/config.${SYS}_${ID}.new"
+
+          merged="${OBJDIR}/config.${SYS}_${ID}.new"
+
+          if [ ! -s "$merged" ]; then
+            echo "ERROR: merge produced empty output" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq '^[[:space:]]*(machine|cpu)[[:space:]]' "$merged"; then
+            echo "ERROR: merged config lacks machine/cpu directives" >&2
+            echo "--- first 80 lines of merged config ---" >&2
+            sed -n '1,80p' "$merged" >&2
+            exit 1
+          fi
+
+          mv "$merged" "${OBJDIR}/config.${SYS}_${ID}"
+          cp "${OBJDIR}/config.${SYS}_${ID}" "${OBJDIR}/config.${SYS}"
+
+          # NetBSD config must be run from the object directory.
+          # sourcedir is the directory containing conf/files, i.e. bsd/.
+          {
+            printf 'builddir\t"."\n'
+            printf 'objectdir\t"."\n'
+            printf 'sourcedir\t"../../.."\n'
+          } >> "${OBJDIR}/config.${SYS}"
+
+          cd "$OBJDIR"
+          /usr/local/bin/config "config.${SYS}"
+
+          echo "=== Generated files ==="
+          ls -lh
+
+      - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: abzu-mach_kernel-ppc
-          path: artifacts/
+          name: real-generated-config-files
+          path: xnu-xnu-1228/bsd/BUILD/obj/RELEASE_PPC/
           if-no-files-found: error
