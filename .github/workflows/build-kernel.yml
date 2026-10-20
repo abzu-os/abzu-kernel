@@ -1,1 +1,89 @@
+name: Build Abzu XNU Kernel
 
+# Builds the custom XNU 1228 kernel (macOS 10.5.8, RELEASE_PPC) with
+# `nix build .#abzu-xnu-10-5-8` (defined in flake.nix) and uploads the
+# resulting mach_kernel binary as a workflow artifact.
+#
+# The kernel derivation builds entirely inside the Nix sandbox: it fetches
+# the pinned xnu-1228 source, compiles the in-sandbox NetBSD `config` tool,
+# and cross-compiles the PPC kernel with clang/lld from llvmPackages_18.
+# No generated config files need to be checked out first -- everything is
+# derived from the fixed-output sources in the flake.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'flake.nix'
+      - 'scripts/**'
+      - '.github/workflows/build-kernel.yml'
+  pull_request:
+    paths:
+      - 'flake.nix'
+      - 'scripts/**'
+      - '.github/workflows/build-kernel.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Determinate Systems' installer already enables nix-command and flakes;
+  # this makes the configuration explicit and tolerates first-run flake
+  # prompts in non-interactive CI.
+  NIX_CONFIG: |
+    accept-flake-config = true
+    experimental-features = nix-command flakes
+
+jobs:
+  build:
+    name: nix build abzu-xnu-10-5-8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Enable magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v9
+
+      - name: Validate flake metadata
+        run: nix flake check --no-build .
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nix build --print-build-logs --keep-going .#abzu-xnu-10-5-8 \
+            --out-link result
+
+          if [ ! -s result/mach_kernel ]; then
+            echo "ERROR: result/mach_kernel missing or empty" >&2
+            ls -lR result >&2 || true
+            exit 1
+          fi
+
+          echo "=== Kernel binary info ==="
+          file result/mach_kernel || true
+          ls -lh result/mach_kernel
+
+          # Record the exact store path and size in the job log.
+          echo "Store path: $(readlink -f result)"
+          echo "Kernel size: $(stat -c %s result/mach_kernel) bytes"
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mach_kernel-ppc-release-${{ github.sha }}
+          path: result/mach_kernel
+          if-no-files-found: error
+          retention-days: 30
