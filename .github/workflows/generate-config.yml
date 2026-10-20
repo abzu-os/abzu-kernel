@@ -194,9 +194,10 @@ jobs:
           cp xnu-xnu-1228/bsd/conf/tools/doconf/doconf.csh /usr/local/bin/doconf
           chmod +x /usr/local/bin/doconf
           
-          # Patch doconf.csh to remove '-c $MASTER_DIR' and '-p' flags which modern NetBSD config doesn't use
-          sed -i 's/\$CONFIG_DIR\/config -c \$MASTER_DIR -p \$SYSCONF/\$CONFIG_DIR\/config \$SYSCONF/' /usr/local/bin/doconf
-          sed -i 's/\$CONFIG_DIR\/config -c \$MASTER_DIR \$SYSCONF/\$CONFIG_DIR\/config \$SYSCONF/' /usr/local/bin/doconf
+          # Patch doconf.csh to output to the correct directory and use modern config syntax
+          sed -i 's|set OBJDIR=../BUILD|set OBJDIR=../BUILD/obj/RELEASE_PPC|' /usr/local/bin/doconf
+          sed -i 's|\$CONFIG_DIR/config -c \$MASTER_DIR -p \$SYSCONF|\$CONFIG_DIR/config \$SYSCONF|' /usr/local/bin/doconf
+          sed -i 's|\$CONFIG_DIR/config -c \$MASTER_DIR \$SYSCONF|\$CONFIG_DIR/config \$SYSCONF|' /usr/local/bin/doconf
           
           # Create a dummy relpath script that doconf.csh expects
           echo '#!/bin/sh' > /tmp/relpath
@@ -209,12 +210,13 @@ jobs:
           export SOURCE=.
           export SRCROOT=.
           
-          # Run doconf to generate the config file AND run the config tool!
-          cd xnu-xnu-1228/bsd
-          /usr/local/bin/doconf -cpu ppc -config -make RELEASE_PPC
+          # Run doconf from the conf directory so ../conf and ../BUILD resolve correctly!
+          # We use -config to run the config tool, but omit -make since we only want to generate the files.
+          cd xnu-xnu-1228/bsd/conf
+          /usr/local/bin/doconf -cpu ppc -config RELEASE_PPC
           
           echo "=== Generated Files ==="
-          ls -lh BUILD/obj/RELEASE_PPC/
+          ls -lh ../BUILD/obj/RELEASE_PPC/
 
       - name: Upload generated files as Artifact
         uses: actions/upload-artifact@v4
