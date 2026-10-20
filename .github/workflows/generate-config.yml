@@ -129,26 +129,20 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install -y build-essential bison flex zlib1g-dev
-          # NOTE: do NOT install libbsd-dev here. On Ubuntu 24.04 its headers add
-          # extern declarations of strlcpy/strlcat to <string.h>, which collide
-          # with the static inline fallbacks in compat.h below and break every
-          # translation unit ("static declaration of 'strlcpy' follows
-          # non-static declaration"). Remove it defensively in case a previous
-          # step or pre-baked image left it installed.
+          # FIX: Added libfl-dev to provide the -lfl linker library
+          sudo apt-get install -y build-essential bison flex libfl-dev zlib1g-dev
+          
           sudo apt-get remove -y libbsd-dev || true
           
           mkdir -p netbsd-config/sys
           cd netbsd-config
           
-          # Helper function to download files and FAIL immediately if 404
           fetch() {
             curl -sSfL -o "$2" "$1"
           }
           
           NB=https://raw.githubusercontent.com/NetBSD/src/netbsd-9
           
-          # Download NetBSD config tool source (VERIFIED PATHS)
           fetch $NB/usr.bin/config/main.c main.c
           fetch $NB/usr.bin/config/mkheaders.c mkheaders.c
           fetch $NB/usr.bin/config/mkmakefile.c mkmakefile.c
@@ -157,25 +151,16 @@ jobs:
           fetch $NB/usr.bin/config/scan.l scan.l
           fetch $NB/usr.bin/config/defs.h defs.h
           fetch $NB/usr.bin/config/util.c util.c
-          # sem.h lives in usr.bin/config itself, NOT in sys/sys (that path 404s)
           fetch $NB/usr.bin/config/sem.h sem.h
           
-          # Dependency headers (VERIFIED PATHS)
-          # crc_buf() comes from usr.bin/cksum (see usr.bin/config/Makefile)
           fetch $NB/usr.bin/cksum/crc.c crc.c
           fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
           fetch $NB/usr.bin/cksum/extern.h extern.h
           
-          # NOTE: we do NOT download NetBSD's <vis.h>/<util.h> and we do NOT
-          # use -I/usr/include/bsd. libbsd's overlay headers shadow glibc's
-          # <sys/cdefs.h> and cause infinite #include_next recursion, and
-          # NetBSD's vis.h/util.h reference __RENAME/emalloc which glibc lacks.
-          # Instead we provide small local compat headers below.
-          
-          # Create dummy sys/sysctl.h (Ubuntu 24.04 removed this from glibc)
           echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
           
-          # Wrapper for <sys/cdefs.h>: pass through to glibc, add NetBSD bits
+          printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
+          
           cat > sys/cdefs.h <<'EOF'
           #pragma GCC system_header
           #include_next <sys/cdefs.h>
@@ -190,9 +175,7 @@ jobs:
           #endif
           EOF
           
-          # Portability shim force-included into every translation unit
           cat > compat.h <<'EOF'
-          /* Portability shim: build NetBSD config(8) on Linux/glibc */
           #ifndef _ABZU_COMPAT_H_
           #define _ABZU_COMPAT_H_
           #include <sys/types.h>
@@ -213,7 +196,6 @@ jobs:
           #define MAX(a,b) (((a)>(b))?(a):(b))
           #endif
           
-          /* BSD-style checked allocators used by config(8) (from libutil) */
           #include <stdio.h>
           #include <stdlib.h>
           #include <string.h>
@@ -224,14 +206,8 @@ jobs:
           static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
           static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
           
-          /* BSD string helpers */
-          #include <sys/sysmacros.h>   /* makedev/major/minor on glibc */
+          #include <sys/sysmacros.h>
           #include <unistd.h>
-          /* Only provide our own strlcpy/strlcat when the system <string.h>
-             does not already declare them. On Ubuntu 24.04 glibc >= 2.38 (and
-             libbsd-dev's overlay headers) declare strlcpy/strlcat as extern;
-             defining a static inline version afterwards is a hard error:
-             "static declaration of 'strlcpy' follows non-static declaration". */
           #ifndef HAVE_STRLCPY_PROTO
           #define HAVE_STRLCPY_PROTO 1
           #include <stddef.h>
@@ -241,7 +217,6 @@ jobs:
           #endif
           #endif
           
-          /* minimal vis(1)/unvis escaping used by main.c */
           #define VIS_TAB 0x01
           #define VIS_NL  0x02
           #define VIS_SAFE 0x04
@@ -269,11 +244,9 @@ jobs:
             }
             *p='\0'; return (int)(p-dst);
           }
-          #endif /* _ABZU_COMPAT_H_ */
+          #endif
           EOF
           
-          # Replace NetBSD-only includes with the compat shim in all sources
-          # Replace NetBSD-only includes with the compat shim in all sources
           for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h; do
             [ -f "$f" ] || continue
             sed -i \
@@ -282,22 +255,11 @@ jobs:
               "$f"
           done
 
-          # gram.y defines the static helper check_version() *after* the
-          # generated parser body calls it (gram.y:309 vs gram.y:1391), which
-          # makes gcc fail with:
-          #   error: static declaration of 'check_version' follows
-          #   non-static declaration
-          # Inject a prototype into the grammar's prologue so every call site
-          # sees the correct static linkage before bison generates gram.c.
           awk '
             /^%[{]/ { print; $0 = "static void check_version(void);" }
             { print }
           ' gram.y > gram.y.fixed && mv gram.y.fixed gram.y
 
-          # The sysctlbyname() branch in main.c is dead code on Linux (it only
-          # runs when config(8) is built as a NetBSD host tool and even then
-          # only for the '-x' extract mode we never use). Provide a stub so the
-          # build does not depend on removed glibc headers or libbsd.
           cat > sys/sysctl_stub.h <<'EOF'
           #ifndef _ABZU_SYSCTL_STUB_H_
           #define _ABZU_SYSCTL_STUB_H_
@@ -314,7 +276,6 @@ jobs:
           EOF
           sed -i 's|^\(#include "compat.h"\)$|\1\n#include "sys/sysctl_stub.h"|' main.c
           
-          # Final sanity check: ensure no file is a 404 page
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
             echo "ERROR: A downloaded file contains a 404 error!"
             exit 1
@@ -323,11 +284,6 @@ jobs:
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
           
-          # Compile with stubs for NetBSD-specific macros and safe include paths.
-          # -DMAKE_BOOTSTRAP activates the portable dev_t/NODEV/NODEVMAJOR/
-          # major/minor/makedev definitions inside NetBSD's defs.h.
-          # -include compat.h injects the shim before any source line, fixing
-          # uint32_t (crc), __RENAME (vis.h) and the missing emalloc family.
           gcc -I. -I./sys \
               -DMAKE_BOOTSTRAP \
               -include compat.h \
@@ -346,12 +302,10 @@ jobs:
           cd xnu-xnu-1228/bsd
           CONF_FILE=../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
           
-          # Append the required paths for the config tool
           echo 'builddir	"."' >> "$CONF_FILE"
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          # Run the locally compiled authentic NetBSD config tool
           /usr/local/bin/config -c ./conf "$CONF_FILE"
           
           echo "=== Generated Files ==="
