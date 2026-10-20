@@ -1,3 +1,5 @@
+# merge.awk - tag-resolution/emission stage. Verbatim port of doconf.csh's inline awk,
+# plus defensive skips for empty tag tokens so malformed table entries can't poison f[].
 part == 0 && $1 != "" {
 	m[$1]=m[$1] " " $2;
 	next;
@@ -11,12 +13,14 @@ part == 0 && $1 == "" {
 	while (na > 0){
 		s=a[na];
 		d=c[na--];
+		if (s == "") continue;
 		if (m[s] == "") {
 			f[s]=d;
 		} else {
 			nx=split(m[s],x," ");
 			for (j=nx;j>0;j--) {
 				z=x[j];
+				if (z == "") continue;
 				a[++na]=z;
 				c[na]=d;
 			}
@@ -35,9 +39,9 @@ part != 0 {
 			}
 		}
 		if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {
-			print $2; 
+			print $2;
 		}
-	} else { 
-		print $2; 
+	} else {
+		print $2;
 	}
 }
