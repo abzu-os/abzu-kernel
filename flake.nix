@@ -20,6 +20,65 @@
         rev = "xnu-1228";
         hash = "sha256-77fddC7Udhh4uuqCJuoyeAuRCNJiNBpZZgivOM8p1gU=";
       };
+
+      # NetBSD sources for usr.bin/config, fetched from the official
+      # cvsweb.cgi raw endpoints (same files as generate-config.yml uses).
+      nbConfigFile = name: pkgs.fetchurl {
+        url = "https://cvsweb.netbsd.org/bsdweb.cgi/usr.bin/config/${name}?only-with-content-type=text%2Fplain&content-type=text%2Fplain&rev=HEAD;";
+        inherit name;
+        # NOTE: placeholder hashes — regenerate all with:
+        #   nix-prefetch-url 'https://cvsweb.netbsd.org/bsdweb.cgi/usr.bin/config/<file>?...&rev=HEAD;'
+        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+      };
+
+      # Authentic NetBSD `config` tool, compiled natively in the sandbox.
+      # Provides the kernel configuration generator that XNU's build
+      # invokes as bare `config` (after patchPhase strips /usr/bin prefix).
+      netbsd-config = pkgs.stdenvNoCC.mkDerivation rec {
+        pname = "netbsd-config";
+        version = "9.0";
+
+        srcFiles = map nbConfigFile [
+          "main.c" "defs.h" "gram.y" "scan.l" "util.c" "sem.h" "sem.c"
+          "files.c" "hash.c" "lint.c" "pack.c" "mkheaders.c" "mkmakefile.c"
+          "mkioconf.c" "mkswap.c" "mkdevsw.c" "crc.c"
+        ];
+
+        nativeBuildInputs = [ pkgs.bison pkgs.flex pkgs.gawk ];
+
+        unpackPhase = ''
+          mkdir -p netbsd-config/sys
+          cd netbsd-config
+          for f in ${toString srcFiles}; do
+            cp "$f" "$(basename "$f")"
+            chmod +w "$(basename "$f")"
+          done
+        '';
+
+        patchPhase = ''
+          # main.c calls check_version(); provide it (defined below in gram.y)
+          substituteInPlace main.c --replace 'check_version();' '// check_version();' || true
+          # Inject a stub check_version definition into gram.y prologue
+          awk '/^%[{]/ { print; $0 = "static void check_version(void) {}" } { print }' gram.y > gram.tmp
+          mv gram.tmp gram.y
+        '';
+
+        buildPhase = ''
+          flex -o scan.c scan.l
+          bison -d -o gram.c gram.y
+          gcc -I. -D_GNU_SOURCE -DMAKE_BOOTSTRAP \
+            -D'__RCSID(x)=' -D'__COPYRIGHT(x)=' -D'__unused=' \
+            -D'__printflike(x,y)=' \
+            -o config main.c mkheaders.c mkmakefile.c mkioconf.c \
+               gram.c scan.c util.c sem.c files.c hash.c lint.c \
+               mkswap.c pack.c mkdevsw.c crc.c
+        '';
+
+        installPhase = ''
+          mkdir -p $out/bin
+          cp config $out/bin/config
+        '';
+      };
     in
     {
       packages.${system}.abzu-xnu-10-5-8 = pkgs.stdenv.mkDerivation {
@@ -27,7 +86,7 @@
         version = "1228";
         src = xnu-src;
 
-        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld ];
+        nativeBuildInputs = [ pkgs.gnumake pkgs.gnused pkgs.gnugrep pkgs.findutils pkgs.python3 pkgs.coreutils pkgs.perl pkgs.tcsh clang lld netbsd-config ];
         hardeningDisable = [ "all" ];
 
         patchPhase = ''
@@ -105,10 +164,21 @@ EOF
 
           export PATH="$TMPDIR/bin:$PATH"
 
+          # Make the authentic NetBSD config tool available as bare `config`
+          # (patchPhase stripped /usr/bin/ prefixes; stdenv puts
+          # netbsd-config/bin on PATH via nativeBuildInputs, but the XNU
+          # makefiles invoke it relative to the source dir in some paths —
+          # mirror it into our mock-bin for belt-and-braces).
+          ln -sf ${netbsd-config}/bin/config "$TMPDIR/bin/config"
+
           export ARCH_CONFIGS=PPC KERNEL_CONFIGS=RELEASE
           export CC="${clang}/bin/clang -target powerpc-apple-darwin -m32"
           export LD="${lld}/bin/ld.lld"
-          export SDKROOT=/
+          # NOTE: SDKROOT intentionally not exported. There is no Darwin SDK
+          # in this sandbox; setting SDKROOT=/ made clang treat / as a sysroot
+          # and silently resolve host headers under a wrong prefix, producing
+          # miscompiled objects. XNU's own headers are supplied via -I flags
+          # from its makefiles.
 
           # Explicitly build the kernel
           make build || make all || make
