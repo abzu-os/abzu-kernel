@@ -19,75 +19,82 @@ jobs:
         run: |
           mkdir -p work
           
-          cat > work/merge.sed << 'SED_EOF'
-/^+/{
-s;[-+];#&;gp
-t loop
-: loop
-n
-/^#/b loop
-/^$/b loop
-s;^\([^#]*\).*#[ 	]*<\(.*\)>[ 	]*$;\2#\1;
-t not
-s;\([^#]*\).*;#\1;
-t not
-: not
-s;[ 	]*$;;
-s;^\!\(.*\);\1#\!;
-p
-t loop
-b loop
-}
-/^[^#]/d
-s;	; ;g
-s;^# *\([^ ]*\)[ ]*=[ ]*\[\(.*\)\].*;\1#\2;p
-SED_EOF
+          # Write sed script with 10 spaces of YAML indentation
+          cat > work/merge.sed.tmp << 'SED_EOF'
+          /^+/{
+          s;[-+];#&;gp
+          t loop
+          : loop
+          n
+          /^#/b loop
+          /^$/b loop
+          s;^\([^#]*\).*#[[:blank:]]*<\(.*\)>[[:blank:]]*$;\2#\1;
+          t not
+          s;\([^#]*\).*;#\1;
+          t not
+          : not
+          s;[[:blank:]]*$;;
+          s;^\!\(.*\);\1#\!;
+          p
+          t loop
+          b loop
+          }
+          /^[^#]/d
+          s;[[:blank:]]; ;g
+          s;^# *\([^ ]*\)[ ]*=[ ]*\[\(.*\)\].*;\1#\2;p
+          SED_EOF
+          # Strip the 10 spaces of YAML indentation so sed reads it cleanly
+          sed -i 's/^          //' work/merge.sed.tmp
+          mv work/merge.sed.tmp work/merge.sed
 
-          cat > work/merge.awk << 'AWK_EOF'
-part == 0 && $1 != "" {
-    m[$1]=m[$1] " " $2;
-    next;
-}
-part == 0 && $1 == "" {
-    for (i=NF;i>1;i--){
-        s=substr($i,2);
-        c[++na]=substr($i,1,1);
-        a[na]=s;
-    }
-    while (na > 0){
-        s=a[na];
-        d=c[na--];
-        if (m[s] == "") {
-            f[s]=d;
-        } else {
-            nx=split(m[s],x," ");
-            for (j=nx;j>0;j--) {
-                z=x[j];
-                a[++na]=z;
-                c[na]=d;
-            }
-        }
-    }
-    part=1;
-    next;
-}
-part != 0 {
-    if ($1 != "") {
-        n=split($1,x,",");
-        ok=0;
-        for (i=1;i<=n;i++) {
-            if (f[x[i]] == "+") {
-                ok=1;
-            }
-        }
-        if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {
-            print $2; 
-        }
-    } else { 
-        print $2; 
-    }
-}
-AWK_EOF
+          # Write awk script with 10 spaces of YAML indentation
+          cat > work/merge.awk.tmp << 'AWK_EOF'
+          part == 0 && $1 != "" {
+              m[$1]=m[$1] " " $2;
+              next;
+          }
+          part == 0 && $1 == "" {
+              for (i=NF;i>1;i--){
+                  s=substr($i,2);
+                  c[++na]=substr($i,1,1);
+                  a[na]=s;
+              }
+              while (na > 0){
+                  s=a[na];
+                  d=c[na--];
+                  if (m[s] == "") {
+                      f[s]=d;
+                  } else {
+                      nx=split(m[s],x," ");
+                      for (j=nx;j>0;j--) {
+                          z=x[j];
+                          a[++na]=z;
+                          c[na]=d;
+                      }
+                  }
+              }
+              part=1;
+              next;
+          }
+          part != 0 {
+              if ($1 != "") {
+                  n=split($1,x,",");
+                  ok=0;
+                  for (i=1;i<=n;i++) {
+                      if (f[x[i]] == "+") {
+                          ok=1;
+                      }
+                  }
+                  if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {
+                      print $2; 
+                  }
+              } else { 
+                  print $2; 
+              }
+          }
+          AWK_EOF
+          sed -i 's/^          //' work/merge.awk.tmp
+          mv work/merge.awk.tmp work/merge.awk
 
       - name: Generate RELEASE_PPC configuration (Merge Stage)
         run: |
@@ -120,7 +127,7 @@ AWK_EOF
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           ls -l "$OBJDIR"
 
-      - name: Compile authentic NetBSD config tool (Official Source List)
+      - name: Compile authentic NetBSD config tool
         run: |
           set -eu
           sudo apt-get update
@@ -136,7 +143,6 @@ AWK_EOF
           
           NB=https://raw.githubusercontent.com/NetBSD/src/netbsd-9
           
-          # Download EXACT source files listed in NetBSD usr.bin/config/Makefile
           fetch $NB/usr.bin/config/main.c main.c
           fetch $NB/usr.bin/config/mkheaders.c mkheaders.c
           fetch $NB/usr.bin/config/mkmakefile.c mkmakefile.c
@@ -154,102 +160,97 @@ AWK_EOF
           fetch $NB/usr.bin/config/lint.c lint.c
           fetch $NB/usr.bin/config/mkdevsw.c mkdevsw.c
           
-          # Dependency headers from cksum (also in NetBSD Makefile)
           fetch $NB/usr.bin/cksum/crc.c crc.c
           fetch $NB/usr.bin/cksum/crc_extern.h crc_extern.h
           fetch $NB/usr.bin/cksum/extern.h extern.h
           
           echo "// dummy header for Ubuntu 24.04 compatibility" > sys/sysctl.h
-          
           printf '#include <stdint.h>\ntypedef int devmajor_t;\n' | cat - defs.h > temp_defs.h && mv temp_defs.h defs.h
           
-          cat > sys/cdefs.h << 'EOF'
-#pragma GCC system_header
-#include_next <sys/cdefs.h>
-#ifndef __RENAME
-#define __RENAME(x)
-#endif
-#ifndef __dead
-#define __dead
-#endif
-#ifndef ___unused
-#define ___unused __attribute__((__unused__))
-#endif
-EOF
+          cat > sys/cdefs.h.tmp << 'EOF'
+          #pragma GCC system_header
+          #include_next <sys/cdefs.h>
+          #ifndef __RENAME
+          #define __RENAME(x)
+          #endif
+          #ifndef __dead
+          #define __dead
+          #endif
+          #ifndef ___unused
+          #define ___unused __attribute__((__unused__))
+          #endif
+          EOF
+          sed -i 's/^          //' sys/cdefs.h.tmp && mv sys/cdefs.h.tmp sys/cdefs.h
           
-          cat > compat.h << 'EOF'
-#ifndef _ABZU_COMPAT_H_
-#define _ABZU_COMPAT_H_
-#include <sys/types.h>
-#include <stdint.h>
-#include <inttypes.h>
-
-#ifndef __RENAME
-#define __RENAME(x)
-#endif
-#define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
-#ifndef __arraycount
-#define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
-#endif
-#ifndef MIN
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#endif
-#ifndef MAX
-#define MAX(a,b) (((a)>(b))?(a):(b))
-#endif
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdarg.h>
-static inline void *emalloc(size_t s){ void *p=malloc(s?s:1); if(!p){perror("emalloc");exit(1);} return p; }
-static inline void *ecalloc(size_t n,size_t s){ void *p=calloc(n?n:1,s?s:1); if(!p){perror("ecalloc");exit(1);} return p; }
-static inline void *erealloc(void *p,size_t s){ void *q=realloc(p,s?s:1); if(!q){perror("erealloc");exit(1);} return q; }
-static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
-static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
-
-#include <sys/sysmacros.h>
-#include <unistd.h>
-#ifndef HAVE_STRLCPY_PROTO
-#define HAVE_STRLCPY_PROTO 1
-#include <stddef.h>
-#if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
-static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
-static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
-#endif
-#endif
-
-#define VIS_TAB 0x01
-#define VIS_NL  0x02
-#define VIS_SAFE 0x04
-static inline int strvis(char *dst,const char *src,int flag){
-  char *p=dst; unsigned char c;
-  while((c=(unsigned char)*src++)!='\0'){
-    if(c=='\t'){ if(dst){*p++='\\';*p++='t';} }
-    else if(c=='\n'){ if(dst){*p++='\\';*p++='n';} }
-    else if(c=='\\'){ if(dst){*p++='\\';*p++='\\';} }
-    else { if(dst)*p++=c; }
-  }
-  if(dst)*p='\0'; return (int)(p-dst);
-}
-static inline int strunvis(char *dst,const char *src){
-  char *p=dst; char c;
-  while((c=*src++)!='\0'){
-    if(c=='\\'&&*src){
-      switch(*src){
-        case 't': *p++='\t'; src++; break;
-        case 'n': *p++='\n'; src++; break;
-        case '\\': *p++='\\'; src++; break;
-        default: *p++=c; break;
-      }
-    } else *p++=c;
-  }
-  *p='\0'; return (int)(p-dst);
-}
-#endif
-EOF
+          cat > compat.h.tmp << 'EOF'
+          #ifndef _ABZU_COMPAT_H_
+          #define _ABZU_COMPAT_H_
+          #include <sys/types.h>
+          #include <stdint.h>
+          #include <inttypes.h>
+          #ifndef __RENAME
+          #define __RENAME(x)
+          #endif
+          #define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
+          #ifndef __arraycount
+          #define __arraycount(a) (sizeof(a) / sizeof((a)[0]))
+          #endif
+          #ifndef MIN
+          #define MIN(a,b) (((a)<(b))?(a):(b))
+          #endif
+          #ifndef MAX
+          #define MAX(a,b) (((a)>(b))?(a):(b))
+          #endif
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <stdarg.h>
+          static inline void *emalloc(size_t s){ void *p=malloc(s?s:1); if(!p){perror("emalloc");exit(1);} return p; }
+          static inline void *ecalloc(size_t n,size_t s){ void *p=calloc(n?n:1,s?s:1); if(!p){perror("ecalloc");exit(1);} return p; }
+          static inline void *erealloc(void *p,size_t s){ void *q=realloc(p,s?s:1); if(!q){perror("erealloc");exit(1);} return q; }
+          static inline char *estrdup(const char *s){ char *q=strdup(s); if(!q){perror("estrdup");exit(1);} return q; }
+          static inline int easprintf(char **strp,const char *fmt,...){ va_list ap; int r; va_start(ap,fmt); r=vasprintf(strp,fmt,ap); va_end(ap); if(r<0){perror("easprintf");exit(1);} return r; }
+          #include <sys/sysmacros.h>
+          #include <unistd.h>
+          #ifndef HAVE_STRLCPY_PROTO
+          #define HAVE_STRLCPY_PROTO 1
+          #include <stddef.h>
+          #if !defined(__GLIBC__) || (defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38))
+          static inline size_t strlcpy(char *d,const char *s,size_t n){ size_t l=strlen(s); if(n){ if(l>=n){memcpy(d,s,n-1);d[n-1]='\0';} else memcpy(d,s,l+1);} return l; }
+          static inline size_t strlcat(char *d,const char *s,size_t n){ size_t dl=strlen(d),sl=strlen(s); if(dl<n)dl+=strlcpy(d+dl,s,n-dl); else{size_t over=dl;n+=over;dl=n-dl;if(dl<n)strlcpy(d+dl,s,n-dl);} return dl+sl; }
+          #endif
+          #endif
+          #define VIS_TAB 0x01
+          #define VIS_NL  0x02
+          #define VIS_SAFE 0x04
+          static inline int strvis(char *dst,const char *src,int flag){
+            char *p=dst; unsigned char c;
+            while((c=(unsigned char)*src++)!='\0'){
+              if(c=='\t'){ if(dst){*p++='\\';*p++='t';} }
+              else if(c=='\n'){ if(dst){*p++='\\';*p++='n';} }
+              else if(c=='\\'){ if(dst){*p++='\\';*p++='\\';} }
+              else { if(dst)*p++=c; }
+            }
+            if(dst)*p='\0'; return (int)(p-dst);
+          }
+          static inline int strunvis(char *dst,const char *src){
+            char *p=dst; char c;
+            while((c=*src++)!='\0'){
+              if(c=='\\'&&*src){
+                switch(*src){
+                  case 't': *p++='\t'; src++; break;
+                  case 'n': *p++='\n'; src++; break;
+                  case '\\': *p++='\\'; src++; break;
+                  default: *p++=c; break;
+                }
+              } else *p++=c;
+            }
+            *p='\0'; return (int)(p-dst);
+          }
+          #endif
+          EOF
+          sed -i 's/^          //' compat.h.tmp && mv compat.h.tmp compat.h
           
-          # Apply compat shim to ALL downloaded source files
           for f in main.c mkheaders.c mkmakefile.c mkioconf.c util.c gram.y scan.l crc.c extern.h crc_extern.h defs.h mkswap.c pack.c sem.c files.c hash.c lint.c mkdevsw.c; do
             [ -f "$f" ] || continue
             sed -i \
@@ -258,25 +259,22 @@ EOF
               "$f"
           done
 
-          awk '
-            /^%[{]/ { print; $0 = "static void check_version(void);" }
-            { print }
-          ' gram.y > gram.y.fixed && mv gram.y.fixed gram.y
+          awk '/^%[{]/ { print; $0 = "static void check_version(void);" } { print }' gram.y > gram.y.fixed && mv gram.y.fixed gram.y
 
-          cat > sys/sysctl_stub.h << 'EOF'
-#ifndef _ABZU_SYSCTL_STUB_H_
-#define _ABZU_SYSCTL_STUB_H_
-#include <stddef.h>
-static inline void *_abzu_sysctlbyname(const char *name, void *oldp,
-    size_t *oldlenp, void *newp, size_t newlen)
-{
-    (void)name; (void)newp; (void)newlen;
-    if (oldlenp) *oldlenp = 0;
-    return oldp;
-}
-#define sysctlbyname(a,b,c,d,e) _abzu_sysctlbyname((a),(b),(c),(d),(e))
-#endif
-EOF
+          cat > sys/sysctl_stub.h.tmp << 'EOF'
+          #ifndef _ABZU_SYSCTL_STUB_H_
+          #define _ABZU_SYSCTL_STUB_H_
+          #include <stddef.h>
+          static inline void *_abzu_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+          {
+              (void)name; (void)newp; (void)newlen;
+              if (oldlenp) *oldlenp = 0;
+              return oldp;
+          }
+          #define sysctlbyname(a,b,c,d,e) _abzu_sysctlbyname((a),(b),(c),(d),(e))
+          #endif
+          EOF
+          sed -i 's/^          //' sys/sysctl_stub.h.tmp && mv sys/sysctl_stub.h.tmp sys/sysctl_stub.h
           sed -i 's|^\(#include "compat.h"\)$|\1\n#include "sys/sysctl_stub.h"|' main.c
           
           if grep -q "404: Not Found" *.c *.h *.y *.l 2>/dev/null; then
@@ -287,7 +285,6 @@ EOF
           bison -d -o gram.c gram.y
           flex -o scan.c scan.l
           
-          # Compile with the EXACT source list from the NetBSD Makefile
           gcc -I. -I./sys \
               -DMAKE_BOOTSTRAP \
               -include compat.h \
@@ -306,7 +303,6 @@ EOF
           cd xnu-xnu-1228/bsd
           CONF_FILE=../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
           
-          # Ensure a trailing newline exists before appending to prevent line merging
           echo "" >> "$CONF_FILE"
           echo 'builddir	"."' >> "$CONF_FILE"
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
