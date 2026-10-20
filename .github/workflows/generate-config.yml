@@ -311,11 +311,12 @@ jobs:
           cd xnu-xnu-1228/bsd
           CONF_FILE=../BUILD/obj/RELEASE_PPC/conf/config.RELEASE_PPC
           
+          # FIX: Ensure a trailing newline exists before appending to prevent line merging
+          echo "" >> "$CONF_FILE"
           echo 'builddir	"."' >> "$CONF_FILE"
           echo 'objectdir	"'"$(pwd)/../BUILD/obj/RELEASE_PPC"'"' >> "$CONF_FILE"
           echo 'sourcedir	"'"$(pwd)/.."'"' >> "$CONF_FILE"
           
-          # FIX: Removed "-c ./conf". NetBSD 9 config takes the file as a direct argument.
           /usr/local/bin/config "$CONF_FILE"
           
           echo "=== Generated Files ==="
