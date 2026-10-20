@@ -181,17 +181,47 @@ jobs:
           
           MASTER=./MASTER
           MASTER_CPU=./MASTER.ppc
-          MASTER_LOCAL=""
-          [ -f "$MASTER.local" ] && MASTER_LOCAL="$MASTER.local"
+
+          # Explicitly generate MASTER.local: XNU 1228 keeps its RELEASE
+          # attribute sets only inside comment blocks in MASTER.ppc
+          # ("#  BASE =        [ ppc mach ... ]") and MASTER
+          # ("#  MACH      = [mach multi16 medium debug]"). The upstream
+          # doconf.csh pipeline uncomments these "# NAME = [ ... ]" lines
+          # before feeding them to merge.sed; we replicate that here by
+          # flattening every such line from BOTH masters into real
+          # "NAME = [ attrs ]" table rows (strip leading '#', expand tabs
+          # to spaces so merge.sed's 's;  ; ;g' double-space collapse works).
+          # The variable-length whitespace between '=' and '[' is tolerated
+          # on input and normalized to a single space on output.
+          {
+            awk '/^[[:space:]]*#[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\[/ {
+                   line=$0
+                   sub(/^[[:space:]]*#[[:space:]]*/, "", line)
+                   gsub(/\t/, "  ", line)
+                   sub(/[[:space:]]*=[[:space:]]*\[/, " = [", line)
+                   print line
+                 }' "$MASTER" "$MASTER_CPU"
+            # Blank-line terminator: merge.awk stays in phase 0 while $1 != ""
+            # (i.e. while lines start with '#'), and switches to emit mode on
+            # the first line whose field 1 is empty -- an empty line after the
+            # s;[^#]*;; substitution. Without this terminator merge.awk never
+            # leaves phase 0 and the merged config comes out empty.
+            printf '\n'
+          } > MASTER.local
+
+          MASTER_LOCAL="MASTER.local"
           MASTER_CPU_LOCAL=""
-          [ -f "$MASTER_CPU.local" ] && MASTER_CPU_LOCAL="$MASTER_CPU.local"
-          
-          # Use the clean, repository-hosted scripts. No YAML escaping hell.
-          echo "+$SYS" | \
-          cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
-              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} - \
-              "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
-              "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} | \
+          if [ -f "$MASTER_CPU.local" ]; then MASTER_CPU_LOCAL="$MASTER_CPU.local"; fi
+
+          # Prepend the flattened table block AHEAD of the +$SYS marker:
+          # merge.sed consumes everything before the first "+CONFIG" line to
+          # build the tag -> +/- lookup table, so the table entries must
+          # precede the marker. This lets merge.awk expand
+          # RELEASE_PPC -> RELEASE -> BASE -> ppc/mach/... and keep the
+          # "machine"/"cpu" lines instead of dying with
+          # "cannot proceed without machine or ioconf specifier".
+          { cat "$MASTER_LOCAL"; echo "+$SYS"; } | \
+          cat - "$MASTER" "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} | \
           sed -n -f ../../../scripts/merge.sed | \
           awk -F# -f ../../../scripts/merge.awk > "$OBJDIR/config.${SYS}_${ID}.new"
           
@@ -203,10 +233,10 @@ jobs:
           mv "$OBJDIR/config.${SYS}_${ID}.new" "$OBJDIR/config.${SYS}_${ID}"
           cp "$OBJDIR/config.${SYS}_${ID}" "$OBJDIR/config.${SYS}"
           
-          # Append paths for the config tool
-          echo 'builddir	"."' >> "$OBJDIR/config.${SYS}"
-          echo 'objectdir	"'"$OBJDIR"'"' >> "$OBJDIR/config.${SYS}"
-          echo 'sourcedir	"../../../.."' >> "$OBJDIR/config.${SYS}"
+          # Append paths for the config tool. Use printf with an explicit
+          # trailing newline so the last line is terminated (prevents
+          # "config: newline missing at EOF" from the config tool).
+          printf 'builddir\t"."\nobjectdir\t"%s"\nsourcedir\t"../../../.."\n' "$OBJDIR" >> "$OBJDIR/config.${SYS}"
           
           # Run the config tool directly
           cd "$OBJDIR"
