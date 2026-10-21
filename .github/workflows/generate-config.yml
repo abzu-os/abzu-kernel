@@ -313,36 +313,57 @@ jobs:
         run: |
           set -euo pipefail
 
-          cd xnu-xnu-1228/bsd/conf
+          SRCROOT="$(pwd)/xnu-xnu-1228"
+          export SRCROOT
+          export OBJROOT="$SRCROOT/BUILD/obj"
+          export SOURCE="$SRCROOT/bsd/conf/MASTER"
 
-          # doconf.csh is the canonical generator.  It expects:
-          #   -cpu   <cpu>      e.g. ppc
-          #   -config <config>   e.g. RELEASE
-          #
-          # The script creates BUILD/obj/RELEASE_PPC/ with the merged
-          # configuration and the generated headers/Makefile.
-          ./tools/doconf/doconf.csh -cpu ppc -config RELEASE
+          # doconf.csh calls `relpath $OBJROOT $OBJDIR` at line 98.
+          # Provide a drop-in replacement built on coreutils realpath.
+          mkdir -p "$RUNNER_TEMP/bin"
+          cat > "$RUNNER_TEMP/bin/relpath" <<'EOF'
+          #!/bin/bash
+          # usage: relpath <from-dir> <to-dir>
+          realpath --relative-to="$1" "$2"
+          EOF
+          chmod +x "$RUNNER_TEMP/bin/relpath"
+          export RELPATH="$RUNNER_TEMP/bin/relpath"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
 
-          # Verify that the critical directives survived.
-          merged="BUILD/obj/RELEASE_PPC/RELEASE_PPC"
+          # doconf.csh writes `sourcedir "$SRCROOT"`; NetBSD config expects
+          # sourcedir to contain conf/files.  For the bsd component that is
+          # bsd/, so expose bsd/conf as $SRCROOT/conf.
+          ln -sfn "$SRCROOT/bsd/conf" "$SRCROOT/conf"
+
+          cd "$SRCROOT/bsd/conf"
+
+          # doconf.csh expects to be run from a directory at the same level
+          # as conf (MASTER_DIR=../conf) and defaults OBJDIR to ../BUILD.
+          # Pass -c so it invokes config after generating the merged file.
+          ./tools/doconf/doconf.csh -cpu ppc -config RELEASE -c
+
+          # doconf writes $OBJDIR/config.$SYSID and then lets config write
+          # into $OBJROOT/$OBJRELDIR (which resolves to $SRCROOT/bsd/BUILD).
+          merged="$SRCROOT/bsd/BUILD/config.RELEASE_PPC"
           if [ ! -f "$merged" ]; then
             echo "ERROR: doconf.csh did not produce $merged" >&2
-            find BUILD -type f | sort >&2
+            find "$SRCROOT/bsd/BUILD" -type f 2>/dev/null | sort >&2 || true
             exit 1
           fi
 
           if ! grep -Eq '^[[:space:]]*(machine|cpu)[[:space:]]' "$merged"; then
             echo "ERROR: generated config lacks machine/cpu directives" >&2
+            echo "--- first 80 lines of $merged ---" >&2
             sed -n '1,80p' "$merged" >&2
             exit 1
           fi
 
           echo "=== Generated files ==="
-          ls -lh BUILD/obj/RELEASE_PPC/
+          find "$SRCROOT/bsd/BUILD" -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort
 
       - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
         with:
           name: real-generated-config-files
-          path: xnu-xnu-1228/bsd/BUILD/obj/RELEASE_PPC/
+          path: xnu-xnu-1228/bsd/BUILD/
           if-no-files-found: error
