@@ -31,7 +31,7 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential bison flex libfl-dev zlib1g-dev
+            build-essential bison flex libfl-dev zlib1g-dev tcsh
           sudo apt-get remove -y libbsd-dev || true
 
           rm -rf netbsd-config
@@ -308,67 +308,37 @@ jobs:
           sudo install -m 0755 config /usr/local/bin/config
           sudo ln -sfn /usr/local/bin/config /usr/bin/config
 
-      - name: Generate config files
+      - name: Generate config using doconf.csh
         shell: bash
         run: |
           set -euo pipefail
 
           cd xnu-xnu-1228/bsd/conf
 
-          SYS="RELEASE_PPC"
-          cpu="ppc"
-          ID="PPC"
-          OBJDIR="../../BUILD/obj/${SYS}"
-          mkdir -p "$OBJDIR"
-
-          MASTER="./MASTER"
-          MASTER_CPU="./MASTER.${cpu}"
-          test -f "$MASTER"
-          test -f "$MASTER_CPU"
-
-          # The merge pipeline expects the +SYS marker FIRST, followed by the
-          # real MASTER and MASTER.ppc files twice.  This is the exact stream
-          # used by tests/test-merge-sed.sh and by upstream doconf.csh.
+          # doconf.csh is the canonical generator.  It expects:
+          #   -cpu   <cpu>      e.g. ppc
+          #   -config <config>   e.g. RELEASE
           #
-          # Putting the MASTER files before the marker causes the machine and
-          # cpu directives to be treated as tag-table input and discarded.
-          {
-            printf '+%s\n' "$SYS"
-            cat "$MASTER" "$MASTER_CPU"
-            cat "$MASTER" "$MASTER_CPU"
-          } | \
-            sed -n -f ../../../scripts/merge.sed | \
-            awk -F'#' -f ../../../scripts/merge.awk \
-              > "${OBJDIR}/config.${SYS}_${ID}.new"
+          # The script creates BUILD/obj/RELEASE_PPC/ with the merged
+          # configuration and the generated headers/Makefile.
+          ./tools/doconf/doconf.csh -cpu ppc -config RELEASE
 
-          merged="${OBJDIR}/config.${SYS}_${ID}.new"
-
-          if [ ! -s "$merged" ]; then
-            echo "ERROR: merge produced empty output" >&2
+          # Verify that the critical directives survived.
+          merged="BUILD/obj/RELEASE_PPC/RELEASE_PPC"
+          if [ ! -f "$merged" ]; then
+            echo "ERROR: doconf.csh did not produce $merged" >&2
+            find BUILD -type f | sort >&2
             exit 1
           fi
 
           if ! grep -Eq '^[[:space:]]*(machine|cpu)[[:space:]]' "$merged"; then
-            echo "ERROR: merged config lacks machine/cpu directives" >&2
-            echo "--- first 80 lines of merged config ---" >&2
+            echo "ERROR: generated config lacks machine/cpu directives" >&2
             sed -n '1,80p' "$merged" >&2
             exit 1
           fi
 
-          mv "$merged" "${OBJDIR}/config.${SYS}_${ID}"
-          cp "${OBJDIR}/config.${SYS}_${ID}" "${OBJDIR}/config.${SYS}"
-
-          {
-            printf 'builddir\t"."\n'
-            printf 'objectdir\t"."\n'
-            printf 'sourcedir\t"../../.."\n'
-          } >> "${OBJDIR}/config.${SYS}"
-
-          cd "$OBJDIR"
-          /usr/local/bin/config "config.${SYS}"
-
           echo "=== Generated files ==="
-          ls -lh
+          ls -lh BUILD/obj/RELEASE_PPC/
 
       - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
