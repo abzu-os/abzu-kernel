@@ -63,7 +63,6 @@ jobs:
           fetch "$NB/usr.bin/cksum/crc_extern.h" crc_extern.h
           fetch "$NB/usr.bin/cksum/extern.h" extern.h
 
-          # Ubuntu 24.04 compatibility shims.
           printf '// dummy header for Ubuntu 24.04 compatibility\n' > sys/sysctl.h
 
           {
@@ -254,7 +253,6 @@ jobs:
               "$f"
           done
 
-          # Forward declaration only; the real definition is later in gram.y.
           sed -i '/^%{/a static void check_version(void);' gram.y
 
           cat > sys/sysctl_stub.h <<'EOF'
@@ -328,27 +326,16 @@ jobs:
           test -f "$MASTER"
           test -f "$MASTER_CPU"
 
-          # Optional per-checkout overrides, exactly as upstream doconf.csh.
-          MASTER_LOCAL=""
-          if [ -f "${MASTER}.local" ]; then
-            MASTER_LOCAL="${MASTER}.local"
-          fi
-
-          MASTER_CPU_LOCAL=""
-          if [ -f "${MASTER_CPU}.local" ]; then
-            MASTER_CPU_LOCAL="${MASTER_CPU}.local"
-          fi
-
-          # The tag-lookup table must be built from the REAL MASTER and
-          # MASTER.ppc files *before* the +SYS marker.  The same files are
-          # repeated *after* the marker so the emission phase sees the
-          # configuration lines.  This mirrors doconf.csh exactly.
+          # The merge pipeline expects the +SYS marker FIRST, followed by the
+          # real MASTER and MASTER.ppc files twice.  This is the exact stream
+          # used by tests/test-merge-sed.sh and by upstream doconf.csh.
+          #
+          # Putting the MASTER files before the marker causes the machine and
+          # cpu directives to be treated as tag-table input and discarded.
           {
-            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
-                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
             printf '+%s\n' "$SYS"
-            cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
-                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
+            cat "$MASTER" "$MASTER_CPU"
+            cat "$MASTER" "$MASTER_CPU"
           } | \
             sed -n -f ../../../scripts/merge.sed | \
             awk -F'#' -f ../../../scripts/merge.awk \
@@ -371,8 +358,6 @@ jobs:
           mv "$merged" "${OBJDIR}/config.${SYS}_${ID}"
           cp "${OBJDIR}/config.${SYS}_${ID}" "${OBJDIR}/config.${SYS}"
 
-          # NetBSD config must be run from the object directory.
-          # sourcedir is the directory containing conf/files, i.e. bsd/.
           {
             printf 'builddir\t"."\n'
             printf 'objectdir\t"."\n'
