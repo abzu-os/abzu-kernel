@@ -339,19 +339,14 @@ jobs:
             MASTER_CPU_LOCAL="${MASTER_CPU}.local"
           fi
 
-          # Input stream restructured to match upstream doconf.csh exactly:
-          #   1. the "+SYS" system marker first ("echo +$SYS"),
-          #   2. the config files — MASTER [MASTER.local] MASTER.cpu
-          #      [MASTER.cpu.local] — which build the tag-lookup table,
-          #   3. a "-" terminator (the trailing "-" in doconf.csh's first
-          #      cat argument list), which switches sed/awk into emission
-          #      mode and is itself discarded,
-          #   4. the same config files repeated (doconf.csh's second cat
-          #      argument list) for the emission phase.
+          # The tag-lookup table must be built from the REAL MASTER and
+          # MASTER.ppc files *before* the +SYS marker.  The same files are
+          # repeated *after* the marker so the emission phase sees the
+          # configuration lines.  This mirrors doconf.csh exactly.
           {
-            printf '+%s\n' "$SYS"
             cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
-                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"} -
+                "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
+            printf '+%s\n' "$SYS"
             cat "$MASTER" ${MASTER_LOCAL:+"$MASTER_LOCAL"} \
                 "$MASTER_CPU" ${MASTER_CPU_LOCAL:+"$MASTER_CPU_LOCAL"}
           } | \
